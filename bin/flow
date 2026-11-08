@@ -1,0 +1,13 @@
+#!/bin/sh
+# Flow engine launcher: resolves its real location so symlinks (~/.flow/flow) work.
+SELF="$0"
+while [ -L "$SELF" ]; do
+  LINK=$(readlink "$SELF")
+  case "$LINK" in
+    /*) SELF="$LINK" ;;
+    *) SELF="$(dirname "$SELF")/$LINK" ;;
+  esac
+done
+ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
+PY="${FLOW_PYTHON:-python3}"
+PYTHONPATH="$ROOT/engine${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" -m flow "$@"

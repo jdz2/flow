@@ -1,0 +1,122 @@
+{
+  "id": "cinematic",
+  "order": 6,
+  "name": "Cinematic",
+  "description": "Speed ramps, film look, letterbox and grain.",
+  "pacing": {
+    "max_gap": 0.35,
+    "pad_in": 0.08,
+    "pad_out": 0.14,
+    "remove_fillers": true,
+    "speed": 1.0
+  },
+  "framing": {
+    "width": 1080,
+    "height": 1920,
+    "reframe": "subject"
+  },
+  "captions": {
+    "enabled": true,
+    "max_words": 4,
+    "max_chars": 26,
+    "case": "lower",
+    "strip_punctuation": true,
+    "font": "Avenir Next",
+    "font_style": "Medium",
+    "size": 0.05,
+    "color": "#FFFFFF",
+    "accent": null,
+    "highlight_emphasis": false,
+    "outline": null,
+    "shadow": {
+      "color": "#000000",
+      "opacity": 0.6,
+      "offset": [
+        0.0,
+        -0.004
+      ],
+      "softness": 0.05
+    },
+    "box": null,
+    "position": [
+      0.5,
+      0.2
+    ],
+    "animation": "fade",
+    "tracking": 1.0,
+    "min_frames": 6,
+    "hold": 0.25
+  },
+  "hook": {
+    "enabled": true,
+    "duration": 2.5,
+    "font": "Avenir Next",
+    "font_style": "Medium",
+    "size": 0.06,
+    "case": "lower",
+    "color": "#FFFFFF",
+    "box": null,
+    "outline": null,
+    "position": [
+      0.5,
+      0.74
+    ],
+    "animation": "fade",
+    "max_chars_per_line": 18
+  },
+  "zoom": {
+    "mode": "auto",
+    "on_cuts": 1.06,
+    "on_emphasis": 0.0,
+    "every": 0.0,
+    "max": 1.15
+  },
+  "ramps": {
+    "auto": true,
+    "min_gap": 1.0,
+    "peak": 300,
+    "steps": 5
+  },
+  "effects": {
+    "auto": [
+      "grain@all",
+      "letterbox@all",
+      "blur_in@start"
+    ]
+  },
+  "masks": {
+    "auto": [
+      "vignette@all"
+    ]
+  },
+  "transitions": {
+    "type": "none"
+  },
+  "grade": {
+    "look": "film",
+    "intensity": 0.9,
+    "balance": true
+  },
+  "audio": {
+    "normalize": true,
+    "target_lufs": -14.0,
+    "voice_isolation": false
+  },
+  "split_edits": {
+    "mode": "auto",
+    "type": "alternate",
+    "max": 0.33,
+    "mid_sentence": "L"
+  },
+  "broll": {
+    "mode": "full",
+    "motion": "push_in",
+    "push": 1.04,
+    "every": 5.0,
+    "max": 4.5,
+    "max_coverage": 0.5,
+    "fade": 6,
+    "audio": "nat",
+    "nat_db": -22.0
+  }
+}

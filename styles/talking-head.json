@@ -1,0 +1,115 @@
+{
+  "id": "talking-head",
+  "order": 2,
+  "name": "Talking Head",
+  "description": "Clean cuts and readable captions for straight-to-camera.",
+  "pacing": {
+    "max_gap": 0.22,
+    "pad_in": 0.05,
+    "pad_out": 0.09,
+    "remove_fillers": true,
+    "speed": 1.0
+  },
+  "framing": {
+    "width": 1080,
+    "height": 1920,
+    "reframe": "subject"
+  },
+  "captions": {
+    "enabled": true,
+    "max_words": 3,
+    "max_chars": 20,
+    "case": "none",
+    "strip_punctuation": true,
+    "font": "Inter",
+    "font_style": "Bold",
+    "size": 0.065,
+    "color": "#FFFFFF",
+    "accent": "#FFD84D",
+    "highlight_emphasis": true,
+    "outline": {
+      "color": "#000000",
+      "width": 0.05
+    },
+    "shadow": {
+      "color": "#000000",
+      "opacity": 0.5,
+      "offset": [
+        0.0,
+        -0.006
+      ],
+      "softness": 0.02
+    },
+    "box": null,
+    "position": [
+      0.5,
+      0.3
+    ],
+    "animation": "pop",
+    "tracking": 1.0,
+    "min_frames": 6,
+    "hold": 0.25
+  },
+  "hook": {
+    "enabled": true,
+    "duration": 2.5,
+    "font": "Inter",
+    "font_style": "Black",
+    "size": 0.07,
+    "case": "none",
+    "color": "#000000",
+    "box": {
+      "color": "#FFFFFF",
+      "opacity": 1.0
+    },
+    "outline": null,
+    "position": [
+      0.5,
+      0.74
+    ],
+    "animation": "pop",
+    "max_chars_per_line": 18
+  },
+  "zoom": {
+    "mode": "auto",
+    "on_cuts": 1.12,
+    "on_emphasis": 0.0,
+    "every": 0.0,
+    "max": 1.3
+  },
+  "ramps": {
+    "auto": false
+  },
+  "effects": {
+    "auto": []
+  },
+  "masks": {
+    "auto": []
+  },
+  "transitions": {
+    "type": "none"
+  },
+  "grade": {
+    "look": "natural",
+    "intensity": 0.8,
+    "balance": true
+  },
+  "audio": {
+    "normalize": true,
+    "target_lufs": -14.0,
+    "voice_isolation": false
+  },
+  "split_edits": {
+    "mode": "auto",
+    "type": "J",
+    "max": 0.2
+  },
+  "broll": {
+    "mode": "full",
+    "motion": "push_in",
+    "push": 1.05,
+    "every": 5.0,
+    "max": 3.5,
+    "max_coverage": 0.35
+  }
+}

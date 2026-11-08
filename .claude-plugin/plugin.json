@@ -1,0 +1,6 @@
+{
+  "name": "flow",
+  "version": "0.1.0",
+  "description": "Flow: AI reel editor for DaVinci Resolve. /flow cuts silences and bad takes, adds captions, punch-ins, hooks, titles, looks, speed ramps and effects, or finishes a timeline from its markers and placeholders.",
+  "author": {"name": "Jan Dz"}
+}
