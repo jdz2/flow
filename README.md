@@ -62,6 +62,7 @@ plugin, or `/flow-<name>` by `install.sh`):
 | `/flow:broll [folder\|bin]` | index and describe B-roll for the current job |
 | `/flow:styles [id]` | list styles, looks and fonts |
 | `/flow:teach <name>` | learn a style from a timeline you cut by hand |
+| `/flow:magnific [folder\|playhead\|bin\|off]` | Magnific creations land in Resolve on their own (see below) |
 | `/flow:check` | check the setup and fix what's missing |
 
 ## What Flow does
@@ -92,6 +93,15 @@ duplicate:
 
 See `skills/flow/reference/notes.md` for how to leave notes.
 
+**Magnific** (with the Magnific tools connected in Claude): Flow watches a folder (default
+`~/Movies/Flow/Magnific`) and imports every new video, image and audio file into the media pool bin
+**Flow › Magnific**, purple, with the prompt and model in the clip metadata. It doesn't matter how a file
+gets there: generated in Claude ("make a 5 s drone shot of the harbour at dusk", priced first, delivered as
+ProRes / 16-bit PNG / WAV), downloaded from the Magnific web app, or exported by a Magnific automation.
+`/flow:magnific playhead` also puts each new creation on the open timeline at the playhead, on its own track
+"Flow Magnific", never over another clip; `/flow:magnific undo` takes it off again. Media pool only is the
+default.
+
 **Styles:** Clean · Talking Head · Talking Head+ · Business · Shorts · Cinematic, plus your own.
 **Teach Flow** your style from a timeline you cut by hand: `/flow` → Teach, or
 `flow learn-style "My Style"`.
@@ -113,6 +123,7 @@ See `skills/flow/reference/notes.md` for how to leave notes.
 | `status` · `jobs` | where a job stands and the next step; recent jobs (offline) |
 | `render [--codec h264\|h265\|prores] [--out dir]` | renders the job's timeline via the Deliver page, with an `.srt` |
 | `srt [--out file]` | writes the job's captions as SubRip (offline) |
+| `magnific status\|folder\|start\|stop\|sync\|pull\|place\|undo` | the Magnific watch folder: settings, the background watcher, one-off imports, saving a finished creation into the folder |
 | `probe --switch` | tests the Resolve API in a "Flow Sandbox" project |
 
 Jobs live in `~/.flow/jobs/<clip>/`: `analysis.json`, `review.txt`, `edit_plan.json`, `build.json`,

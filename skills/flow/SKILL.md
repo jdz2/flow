@@ -1,13 +1,14 @@
 ---
 name: flow
-description: Flow — AI video editor for DaVinci Resolve. Turns a clip into a finished, editable reel (cuts silences and bad takes, captions, punch-in zooms, hook title, color grade/LUTs, speed ramps, effects, masks, titles), or finishes an existing timeline by reading its production notes (markers, placeholders, notes files) and completing them. Use when the user types /flow, asks to edit/cut a reel, short, TikTok or talking-head clip in Resolve, asks to "finish", "complete my markers/notes/placeholders", add titles or a cinematic look to a Resolve timeline, or wants to teach Flow their editing style.
+description: Flow — AI video editor for DaVinci Resolve. Turns a clip into a finished, editable reel (cuts silences and bad takes, captions, punch-in zooms, hook title, color grade/LUTs, speed ramps, effects, masks, titles), or finishes an existing timeline by reading its production notes (markers, placeholders, notes files) and completing them. Use when the user types /flow, asks to edit/cut a reel, short, TikTok or talking-head clip in Resolve, asks to "finish", "complete my markers/notes/placeholders", add titles or a cinematic look to a Resolve timeline, or wants to teach Flow their editing style. Also use it for Magnific in Resolve: /flow:magnific, a folder where Magnific creations (images, videos, audio) land and get imported into Resolve automatically, or generating a shot or image with Magnific for the edit.
 ---
 
 # Flow
 
 Flow edits inside DaVinci Resolve (Studio, external scripting set to Local). Everything it makes is a
 normal, editable Resolve timeline. **Flow never modifies an existing timeline**: reels go on a new
-timeline in a "Flow" bin, and Finish mode works on a duplicate.
+timeline in a "Flow" bin, and Finish mode works on a duplicate. The one exception is opt-in: Magnific's
+playhead mode (section 4), which only adds creations on its own track.
 
 The engine is the `flow` CLI: run it as `~/.flow/flow <command>` (fallback: `<repo>/bin/flow`).
 Commands print a human summary; add `--json` for data. You (Claude) make all the creative calls: which
@@ -34,6 +35,7 @@ Pick the mode from their answer; if unclear, ask with AskUserQuestion:
 - **Finish**: complete an existing multi-clip timeline (aftermovie, montage, edit in progress) from its
   markers, placeholders and notes: titles, look, cinematic touches, speed changes, B-roll.
 - **Teach**: learn a custom style from a timeline they edited by hand.
+- **Magnific**: creations from Magnific (made here or in the Magnific app) land in Resolve on their own.
 
 ## 1. Reel mode
 
@@ -69,7 +71,8 @@ Pick the mode from their answer; if unclear, ask with AskUserQuestion:
    yellow id label, then 4 frames). Write a one-line description of what each undescribed clip shows
    (subject, place, action, shot type, mood) to a JSON file, then run
    `~/.flow/flow broll-describe --file <that file>`. Descriptions are cached, so a clip is only
-   described once. Then pick inserts for the plan's `broll` list.
+   described once. Then pick inserts for the plan's `broll` list. Magnific creations sit in the bin
+   Flow › Magnific with their prompt as keywords: add `--bin Magnific` to use them.
    **AI shots (if asked for):** see "AI shots" below. They join the same B-roll library.
 5. **Write `~/.flow/jobs/latest/edit_plan.json`.** Start from `edit_plan.draft.json` and follow
    `reference/edit_plan.md`:
@@ -190,11 +193,54 @@ Needs a connected video-generation tool set in this Claude session (for example 
 - **From a description**: interview them (caption look, pacing, zooms, grade), write the differences as
   JSON per `reference/styles.md`, then pipe it to `~/.flow/flow style-save --base <closest>`.
 
+## 4. Magnific (creations straight into Resolve)
+
+`/flow:magnific`, "watch my Magnific folder", "make a drone shot of … for the intro". Generating needs the
+Magnific tools in this Claude session; the folder part works without them (Resolve Studio, scripting on).
+
+**The folder is the contract.** Flow watches one folder (default `~/Movies/Flow/Magnific`) and imports every
+new video, image and audio file into the media pool bin **Flow › Magnific**: purple, prompt in Comments,
+"Magnific, <model>" in Keywords. It doesn't matter how a file got there: pulled here from the Magnific MCP,
+downloaded from the Magnific web app, or exported by a Magnific automation. A file is taken once it stops
+changing; partial downloads are ignored.
+
+1. **Set up** (first time): `~/.flow/flow magnific status`. No folder yet: ask once (offer the default), then
+   `flow magnific folder "<dir>"`. Files already in it are left alone (`flow magnific sync --all` brings them
+   in). Then `flow magnific start`: a background watcher that keeps running after this chat. Say in one line
+   where new creations land.
+2. **Where they go.** `flow magnific place bin` is the default: media pool only, no timeline is touched.
+   `flow magnific place playhead` (only when the user asks for it) also puts each new creation on the open
+   timeline at the playhead, on its own track "Flow Magnific" (sound files on "Flow Magnific Audio"), at the
+   first spot of that track that is free for its whole length. Nothing already on the timeline is moved,
+   trimmed or covered. Stills last `--still` seconds (default 5). `flow magnific undo` takes the last placed
+   creation off again (it stays in the media pool). The running watcher picks up a new mode by itself.
+3. **Making something.** `magnific_start`, then the matching tool (`images_generate`, `video_generate`, …).
+   Match the open timeline's shape (`flow magnific status` shows it, e.g. 9:16 for a reel). Price
+   videos and batches with `simulate_cost` first, say the credits and wait for a clear yes. Wait with
+   `creations_wait`, then look at the result (`creations_read` for an image, `video_view_frames` for a
+   video) before you deliver it.
+4. **Deliver into the folder.** `creations_register_download` for the creation, then `creations_deliver` in
+   an editor format: video `prores_422hq` (`prores_4444` keeps the transparency of a cut-out), image
+   `png16`, audio `wav_48k`; on `processing`, call again after `poll_after_seconds`. Then
+   `flow magnific pull --url "<url>" --name "<short title>" --creation <id> --prompt "<prompt>" --model <slug>`.
+   If delivering fails, use `originals[].url` from `creations_register_download`, else the creation's `url`.
+   The watcher imports the file within seconds; if it is off, run `flow magnific sync`. Report in one line
+   what landed where (names and Magnific's webUrl, not ids).
+5. **Existing or automated creations** ("bring in what I made in Magnific today", "sync project X"): find
+   the project with `folders_list`, list its creations with `creations_search` (`folderReference`,
+   `dateStart`), skip the ids in `flow magnific status --json` → `pulled_creations`, then deliver and pull
+   each one as in step 4. For hands-off syncing, suggest `/loop 15m /flow:magnific sync <project>`.
+6. **In a reel**, Magnific videos work like any B-roll: `flow broll --bin Magnific`, then the plan's `broll`
+   list or `flow edit broll --broll-clip B7` at the playhead.
+
+`flow magnific status` shows what came in, what is waiting and whether the watcher runs; `flow magnific
+stop` ends it. The watcher's log is `~/.flow/magnific/watch.log`.
+
 ## Rules
 
 - Never switch projects, delete timelines or edit the user's original timeline. Ask first if something
   would need that. (`flow probe --switch` saves the project and opens a "Flow Sandbox" project; only use
-  it with the user's OK.)
+  it with the user's OK.) Magnific's playhead mode, which the user turns on, is the one exception.
 - If Resolve refuses the connection: Preferences → System → General → External scripting using: Local
   (Studio only). On the free edition, build from inside Resolve with Workspace → Scripts → Flow Build
   after `flow compile`.
@@ -204,4 +250,6 @@ Needs a connected video-generation tool set in this Claude session (for example 
   without it.
 - Every AI generation costs the user credits: price it with `simulate_cost`, say the number, and only
   run it after a clear yes. Treat results as drafts: look at them before placing them.
+- Magnific creations go to the media pool unless the user turned on `flow magnific place playhead`; never
+  switch it on by yourself.
 - Keep chat updates short. Flow's whole promise is speed.

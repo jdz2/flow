@@ -261,6 +261,42 @@ def cmd_aishots_import(args):
     return 0
 
 
+def cmd_magnific(args):
+    from flow import magnific as mg
+    a, v = args.action, args.value
+    if a == "watch":
+        return mg.watch()
+    if a == "status":
+        st = mg.status(resolve=not args.offline)
+        _out(args, st, mg.format_status(st))
+        return 0
+    if a == "sync":
+        res = mg.sync(all_=args.all, where=args.place)
+        _out(args, res, mg.format_sync(res))
+        return 0
+    if a == "folder":
+        res = mg.set_folder(v, all_=args.all) if v else mg.status()
+        _out(args, res, res["say"] if v else mg.format_status(res))
+        return 0
+    if a == "pull":
+        res = mg.pull(url=args.url, file=args.file, name=args.name, creation=args.creation, prompt=args.prompt,
+                      model=args.model, kind=args.kind, ext=args.ext, force=args.force)
+    elif a == "start":
+        res = mg.start(where=args.place or v, interval=args.interval, still_seconds=args.still)
+    elif a == "stop":
+        res = mg.stop()
+    elif a == "place":
+        if not v:
+            raise FlowError("Say where new creations go: `flow magnific place bin` or `flow magnific place playhead`.")
+        res = mg.set_place(v, still_seconds=args.still)
+    elif a == "undo":
+        res = mg.undo()
+    else:
+        raise FlowError(f"unknown magnific action {a!r}")
+    _out(args, res, res.get("say", "done"))
+    return 0
+
+
 def cmd_edit(args):
     from flow import liveedit
     ses = liveedit.Session(show=not args.quiet)
@@ -408,6 +444,23 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--url")
     sp.add_argument("--file")
     sp.add_argument("--creation", help="the service's creation id, kept for reference")
+    sp = add("magnific", cmd_magnific, "Magnific creations into Resolve through a watched folder (see flow/magnific.py)")
+    sp.add_argument("action", choices=["status", "folder", "pull", "sync", "start", "stop", "watch", "place", "undo"])
+    sp.add_argument("value", nargs="?", help="folder: the folder · place: bin or playhead · start: bin or playhead")
+    sp.add_argument("--all", action="store_true", help="folder/sync: also import files that were there before")
+    sp.add_argument("--url", help="pull: the finished creation's https link")
+    sp.add_argument("--file", help="pull: a local file instead of a link")
+    sp.add_argument("--name", help="pull: a short title (file name, media pool Description)")
+    sp.add_argument("--creation", help="pull: the Magnific creation id (kept in the clip metadata)")
+    sp.add_argument("--prompt", help="pull: the prompt (media pool Comments)")
+    sp.add_argument("--model", help="pull: the model slug (media pool Keywords)")
+    sp.add_argument("--kind", choices=["video", "image", "audio"], help="pull: what the file must be")
+    sp.add_argument("--ext", help="pull: file extension when the link hides it (.mov, .png, .wav)")
+    sp.add_argument("--force", action="store_true", help="pull: save again even if the creation is in the folder")
+    sp.add_argument("--place", choices=["bin", "playhead"], help="sync/start: where new creations go")
+    sp.add_argument("--still", type=float, help="seconds a still image lasts on the timeline (default 5)")
+    sp.add_argument("--interval", type=float, help="start: seconds between the watcher's looks (default 3)")
+    sp.add_argument("--offline", action="store_true", help="status: don't ask Resolve which timeline is open")
     sp = add("edit", cmd_edit, "live edit the open Flow timeline in place (see flow/liveedit.py)")
     sp.add_argument("action", choices=["where", "zoom", "captions", "caption-text", "grade", "fx", "broll",
                                        "undo", "log"])

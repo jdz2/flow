@@ -1,6 +1,6 @@
 {
   "name": "flow",
-  "version": "0.2.0",
-  "description": "Flow: AI reel editor for DaVinci Resolve. /flow cuts silences and bad takes, adds captions, punch-ins, hooks, titles, looks, speed ramps and effects, or finishes a timeline from its markers and placeholders. Shortcuts: /flow:reel, /flow:finish, /flow:tweak, /flow:undo, /flow:render, /flow:status, /flow:broll, /flow:styles, /flow:teach, /flow:check.",
+  "version": "0.3.0",
+  "description": "Flow: AI reel editor for DaVinci Resolve. /flow cuts silences and bad takes, adds captions, punch-ins, hooks, titles, looks, speed ramps and effects, or finishes a timeline from its markers and placeholders. Shortcuts: /flow:reel, /flow:finish, /flow:tweak, /flow:undo, /flow:render, /flow:status, /flow:broll, /flow:styles, /flow:teach, /flow:check, /flow:magnific (Magnific creations into Resolve through a watched folder).",
   "author": {"name": "Jan Dz"}
 }
