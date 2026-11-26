@@ -46,12 +46,14 @@ Pick the mode from their answer; if unclear, ask with AskUserQuestion:
 3. **Ask the setup questions** while it runs. Use one AskUserQuestion call with up to 4 questions:
    - **Style**: show the 4 best fits for this clip and name the others in the question text so they can
      type them. Built-ins: Clean, Talking Head, Talking Head+, Business, Shorts, Cinematic. Custom styles
-     come from `~/.flow/flow styles`.
+     come from `~/.flow/flow styles`. When unsure, recommend Talking Head. "Cinematic" means the
+     style (its look is Film).
    - **Caption font**: 4 installed fonts from `~/.flow/flow fonts --json` (recommended + installed).
      Put the style's default first.
-   - **Color grade**: Natural, Orange & Teal, Film, Leave it. Name Moody, Warm, Cool, B&W, Vintage and
-     "my own LUT" in the question text.
-   - **Extras** (multiSelect): Hook title, Punch-in zooms, B-roll, J/L cuts. Name "Effects & masks",
+   - **Color grade**: Natural, Orange & Teal, Film, Leave it. Name Moody, Warm, Cool, B&W, Vintage,
+     Nightlife (club and neon light only; never a default) and "my own LUT" in the question text.
+   - **Extras** (multiSelect): Hook title, Punch-in zooms, B-roll, J/L cuts. "No captions" goes in the
+     question text (set `overrides.captions.enabled: false`). Name "Effects & masks",
      "Speed ramps / slow-mo" and "AI shots (restyle or generate, costs credits)" in the question text. Say which ones the chosen style turns on by
      default.
    - If they pick **B-roll** and haven't said where it is, ask for the folder or media pool bin in a

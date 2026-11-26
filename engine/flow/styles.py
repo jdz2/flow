@@ -55,14 +55,25 @@ def all_styles() -> Dict[str, dict]:
 def _resolve(sid: str, styles: Dict[str, dict], seen: Optional[set] = None) -> dict:
     seen = seen or set()
     if sid in seen:
-        raise FlowError(f"Style inheritance loop at '{sid}'")
+        raise FlowError(f"Style inheritance loop at '{sid}' (check its \"extends\")")
     seen.add(sid)
     if sid not in styles:
         raise FlowError(f"Unknown style '{sid}'. Available: {', '.join(sorted(styles))}")
     raw = styles[sid]
     parent = raw.get("extends")
     if parent:
-        base = _resolve(parent, styles, seen)
+        try:
+            pid = match_style_id(parent, styles)   # "Talking Head+" works as well as "talking-head-plus"
+        except FlowError:
+            raise FlowError(f"Style '{sid}' extends unknown style '{parent}'. "
+                            f"Available: {', '.join(sorted(styles))}") from None
+        if pid == sid:
+            # a custom file that shadows a built-in and extends it: resolve the built-in underneath
+            builtin = _load_dir(paths.BUILTIN_STYLES_DIR, "builtin")
+            if sid not in builtin:
+                raise FlowError(f"Style '{sid}' extends itself")
+            return deep_merge(copy.deepcopy(builtin[sid]), {k: v for k, v in raw.items() if k != "extends"})
+        base = _resolve(pid, styles, seen)
         merged = deep_merge(base, {k: v for k, v in raw.items() if k != "extends"})
         merged["extends"] = parent
         return merged
@@ -91,13 +102,70 @@ def match_style_id(name: str, styles: Optional[Dict[str, dict]] = None) -> str:
     raise FlowError(f"Unknown style '{name}'. Available: {', '.join(sorted(styles))}")
 
 
+_HEX = re.compile(r"^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+ENUMS = {
+    ("captions", "case"): ("none", "upper", "lower"),
+    ("hook", "case"): ("none", "upper", "lower"),
+    ("captions", "animation"): ("pop", "pop_strong", "fade", "slide", "tracking", "none"),
+    ("hook", "animation"): ("pop", "pop_strong", "fade", "slide", "tracking", "none"),
+    ("transitions", "type"): ("none", "smooth_cut", "dissolve"),
+    ("framing", "reframe"): ("subject", "smart", "center"),
+    ("split_edits", "type"): ("J", "L", "j", "l", "alternate"),
+    ("zoom", "mode"): ("auto", "none"),
+}
+
+
+def validate_style(style: dict) -> List[str]:
+    """Problems that would otherwise only show up mid-build in Resolve (or as an ungraded timeline)."""
+    errs: List[str] = []
+    for sec in REQUIRED_SECTIONS:
+        if sec not in style:
+            errs.append(f"missing section '{sec}'")
+        elif not isinstance(style[sec], dict):
+            errs.append(f"'{sec}' must be an object, got {type(style[sec]).__name__}")
+    for sec in ("captions", "hook"):
+        cfg = style.get(sec)
+        if not isinstance(cfg, dict):
+            continue
+        for key in ("color", "accent"):
+            v = cfg.get(key)
+            if v is not None and not (isinstance(v, str) and _HEX.match(v)):
+                errs.append(f"{sec}.{key} must be a hex colour like #FFFFFF, got {v!r}")
+        for key in ("outline", "shadow", "box"):
+            v = cfg.get(key)
+            if isinstance(v, dict) and v.get("color") is not None and not _HEX.match(str(v["color"])):
+                errs.append(f"{sec}.{key}.color must be a hex colour, got {v['color']!r}")
+        pos = cfg.get("position")
+        if pos is not None and not (isinstance(pos, (list, tuple)) and len(pos) == 2
+                                    and all(isinstance(x, (int, float)) and 0.0 <= x <= 1.0 for x in pos)):
+            errs.append(f"{sec}.position must be [x, y] with both in 0..1, got {pos!r}")
+        size = cfg.get("size")
+        if size is not None and not (isinstance(size, (int, float)) and 0.0 < size < 0.5):
+            errs.append(f"{sec}.size must be a number between 0 and 0.5, got {size!r}")
+    for (sec, key), allowed in ENUMS.items():
+        cfg = style.get(sec)
+        if isinstance(cfg, dict) and cfg.get(key) is not None and cfg[key] not in allowed:
+            errs.append(f"{sec}.{key} must be one of {', '.join(allowed)}, got {cfg[key]!r}")
+    g = style.get("grade")
+    if isinstance(g, dict) and g.get("look") and not g.get("lut"):
+        from flow import luts
+        try:
+            luts.normalize_look(str(g["look"]))
+        except ValueError as exc:
+            errs.append(f"grade.look: {exc}")
+    return errs
+
+
+def check_style(style: dict, name: str) -> dict:
+    errs = validate_style(style)
+    if errs:
+        raise FlowError(f"Style '{name}' has problems: " + "; ".join(errs))
+    return style
+
+
 def get_style(name: str) -> dict:
     styles = all_styles()
-    style = _resolve(match_style_id(name, styles), styles)
-    missing = [s for s in REQUIRED_SECTIONS if s not in style]
-    if missing:
-        raise FlowError(f"Style '{name}' is missing sections: {', '.join(missing)}")
-    return style
+    return check_style(_resolve(match_style_id(name, styles), styles), name)
 
 
 def list_styles() -> List[dict]:
@@ -125,7 +193,9 @@ def save_user_style(data: dict, base: Optional[str] = None) -> Path:
     if base:
         out["extends"] = match_style_id(base)
     out.setdefault("description", "Custom style")
+    styles = all_styles()                 # validate before anything is written
+    styles[sid] = dict(out, _source="custom")
+    check_style(_resolve(sid, styles), name)
     path = paths.USER_STYLES_DIR / f"{sid}.json"
     write_json(path, out)
-    get_style(sid)  # validate it resolves
     return path

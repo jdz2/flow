@@ -2,7 +2,7 @@
   "id": "cinematic",
   "order": 6,
   "name": "Cinematic",
-  "description": "Speed ramps, film look, letterbox and grain.",
+  "description": "Film look, grain, speed ramps through pauses and soft lower-case type.",
   "pacing": {
     "max_gap": 0.35,
     "pad_in": 0.08,
@@ -40,7 +40,7 @@
     "box": null,
     "position": [
       0.5,
-      0.2
+      0.28
     ],
     "animation": "fade",
     "tracking": 1.0,
@@ -59,10 +59,19 @@
     "outline": null,
     "position": [
       0.5,
-      0.74
+      0.8
     ],
     "animation": "fade",
-    "max_chars_per_line": 18
+    "max_chars_per_line": 20,
+    "shadow": {
+      "color": "#000000",
+      "opacity": 0.6,
+      "offset": [
+        0.0,
+        -0.004
+      ],
+      "softness": 0.06
+    }
   },
   "zoom": {
     "mode": "auto",
@@ -73,14 +82,13 @@
   },
   "ramps": {
     "auto": true,
-    "min_gap": 1.0,
-    "peak": 300,
+    "min_gap": 1.5,
+    "peak": 200,
     "steps": 5
   },
   "effects": {
     "auto": [
       "grain@all",
-      "letterbox@all",
       "blur_in@start"
     ]
   },

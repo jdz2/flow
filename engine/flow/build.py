@@ -553,10 +553,11 @@ def build_job(job: Path, live: Any = None) -> dict:
                 d = it.GetDuration()
                 try:
                     if kind == "caption":
-                        ok = style_caption(it, data["text"], style["captions"], bool(data.get("accent")), d)
+                        ok = style_caption(it, data["text"], style["captions"], bool(data.get("accent")), d,
+                                           fade_out=not data.get("handoff"), fps=fps)
                         label = data["text"]
                     elif kind == "hook":
-                        ok = style_caption(it, data["text"], style["hook"], False, d)
+                        ok = style_caption(it, data["text"], style["hook"], False, d, fps=fps)
                         label = "Hook: " + data["text"].replace("\n", " ")
                     else:
                         cfg = title_config(data["kind"], {"captions": style["captions"],
