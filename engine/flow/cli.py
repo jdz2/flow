@@ -261,6 +261,59 @@ def cmd_aishots_import(args):
     return 0
 
 
+def cmd_magnific(args):
+    from flow import magnific as mg
+    a, v = args.action, args.value
+    if a == "watch":
+        return mg.watch()
+    if a == "selftest":
+        from flow import magnific_live
+        res = magnific_live.run_live(switch=args.switch, url=args.url, creation=args.creation, name=args.name,
+                                     prompt=args.prompt, model=args.model)
+        _out(args, res, magnific_live.format_result(res))
+        return 0 if res.get("ok") else 1
+    if a == "slots":
+        from flow import magnific_slots as ms
+        res = mg.slots(mark=not args.no_mark)
+        _out(args, res, ms.format_slots(res))
+        return 0
+    if a == "status":
+        st = mg.status(resolve=not args.offline)
+        _out(args, st, mg.format_status(st))
+        return 0
+    if a == "sync":
+        res = mg.sync(all_=args.all, where=args.place)
+        _out(args, res, mg.format_sync(res))
+        return 0
+    if a == "folder":
+        res = mg.set_folder(v, all_=args.all) if v else mg.status()
+        _out(args, res, res["say"] if v else mg.format_status(res))
+        return 0
+    if a == "pull":
+        res = mg.pull(url=args.url, file=args.file, name=args.name, creation=args.creation, prompt=args.prompt,
+                      model=args.model, kind=args.kind, ext=args.ext, force=args.force, slot=args.slot,
+                      version_of=args.version_of)
+    elif a == "put":
+        if not (v or args.file) or not args.slot:
+            raise FlowError("Say which creation and which slot: `flow magnific put FILE --slot S3`.")
+        res = mg.put(v or args.file, args.slot, src_in=args.src_in)
+    elif a == "start":
+        res = mg.start(where=args.place or v, interval=args.interval, still_seconds=args.still)
+    elif a == "stop":
+        res = mg.stop()
+    elif a == "place":
+        if not v:
+            raise FlowError("Say where new creations go: `flow magnific place bin`, `… place slots` or "
+                            "`… place playhead`.")
+        res = mg.set_place(v, still_seconds=args.still)
+    elif a == "undo":
+        res = mg.undo()
+    else:
+        raise FlowError(f"unknown magnific action {a!r}")
+    _out(args, res, res.get("say", "done"))
+    return 0
+
+
 def cmd_edit(args):
     from flow import liveedit
     ses = liveedit.Session(show=not args.quiet)
@@ -408,6 +461,33 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--url")
     sp.add_argument("--file")
     sp.add_argument("--creation", help="the service's creation id, kept for reference")
+    sp = add("magnific", cmd_magnific, "Magnific creations into Resolve through a watched folder (see flow/magnific.py)")
+    sp.add_argument("action", choices=["status", "folder", "pull", "sync", "start", "stop", "watch", "place", "undo",
+                                       "slots", "put", "selftest"])
+    sp.add_argument("value", nargs="?", help="folder: the folder · place/start: bin, slots or playhead · "
+                                             "put: the creation's file")
+    sp.add_argument("--all", action="store_true", help="folder/sync: also import files that were there before")
+    sp.add_argument("--url", help="pull: the finished creation's https link")
+    sp.add_argument("--file", help="pull: a local file instead of a link")
+    sp.add_argument("--name", help="pull: a short title (file name, media pool Description)")
+    sp.add_argument("--creation", help="pull: the Magnific creation id (kept in the clip metadata)")
+    sp.add_argument("--prompt", help="pull: the prompt (media pool Comments)")
+    sp.add_argument("--model", help="pull: the model slug (media pool Keywords)")
+    sp.add_argument("--kind", choices=["video", "image", "audio"], help="pull: what the file must be")
+    sp.add_argument("--ext", help="pull: file extension when the link hides it (.mov, .png, .wav)")
+    sp.add_argument("--force", action="store_true", help="pull: save again even if the creation is in the folder")
+    sp.add_argument("--slot", help="pull: the slot it was made for (S3) · put: the slot to build it into")
+    sp.add_argument("--version-of", dest="version_of", help="pull: the creation it is a new version of")
+    sp.add_argument("--in", dest="src_in", type=float,
+                    help="put: where in the creation the used part starts, in seconds (default: the middle)")
+    sp.add_argument("--no-mark", dest="no_mark", action="store_true",
+                    help="slots: only read; don't write slot ids into Resolve markers")
+    sp.add_argument("--place", choices=["bin", "slots", "playhead"], help="sync/start: where new creations go")
+    sp.add_argument("--still", type=float, help="seconds a still image lasts on the timeline (default 5)")
+    sp.add_argument("--interval", type=float, help="start: seconds between the watcher's looks (default 3)")
+    sp.add_argument("--offline", action="store_true", help="status: don't ask Resolve which timeline is open")
+    sp.add_argument("--switch", action="store_true",
+                    help="selftest: save the open project, run in the Flow Sandbox project, switch back after")
     sp = add("edit", cmd_edit, "live edit the open Flow timeline in place (see flow/liveedit.py)")
     sp.add_argument("action", choices=["where", "zoom", "captions", "caption-text", "grade", "fx", "broll",
                                        "undo", "log"])

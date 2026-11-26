@@ -62,6 +62,7 @@ plugin, or `/flow-<name>` by `install.sh`):
 | `/flow:broll [folder\|bin]` | index and describe B-roll for the current job |
 | `/flow:styles [id]` | list styles, looks and fonts |
 | `/flow:teach <name>` | learn a style from a timeline you cut by hand |
+| `/flow:magnific [folder\|slots\|auto\|playhead\|bin\|put\|fill\|off]` | Magnific creations land in Resolve on their own, and into their spot in the edit (see below) |
 | `/flow:check` | check the setup and fix what's missing |
 
 ## What Flow does
@@ -92,6 +93,20 @@ duplicate:
 
 See `skills/flow/reference/notes.md` for how to leave notes.
 
+**Magnific** (with the Magnific tools connected in Claude): Flow watches a folder (default
+`~/Movies/Flow/Magnific`) and imports every new video, image and audio file into the media pool bin
+**Flow › Magnific**, purple, with the prompt and model in the clip metadata. It doesn't matter how a file
+gets there: generated in Claude ("make a 5 s drone shot of the harbour at dusk", priced first, delivered as
+ProRes / 16-bit PNG / WAV), downloaded from the Magnific web app, or exported by a Magnific automation.
+Flow also knows the **slots** of the open timeline (`/flow:magnific slots`): B-roll markers, B-roll
+placeholders and Magnific clips already in the edit, S1, S2 … A creation made for a slot ("S3 · harbour
+drone") goes straight into it: an open slot gets a new clip on a "Flow B-roll" track above it (the
+placeholder switched off, never over another clip), and a new version of a clip in the edit becomes a take
+on it, so the earlier one is a click away. Everything else stays in the media pool; `/flow:magnific bin`
+keeps all new creations there, and `/flow:magnific put` builds one into a slot by hand. `/flow:magnific fill` writes prompts for the open slots, prices them in one go and, after your yes,
+fills them. `/flow:magnific playhead` also puts every other new creation at the playhead, on its own track
+"Flow Magnific"; `/flow:magnific undo` takes the last one back.
+
 **Styles:** Clean · Talking Head · Talking Head+ · Business · Shorts · Cinematic, plus your own.
 **Teach Flow** your style from a timeline you cut by hand: `/flow` → Teach, or
 `flow learn-style "My Style"`.
@@ -113,6 +128,9 @@ See `skills/flow/reference/notes.md` for how to leave notes.
 | `status` · `jobs` | where a job stands and the next step; recent jobs (offline) |
 | `render [--codec h264\|h265\|prores] [--out dir]` | renders the job's timeline via the Deliver page, with an `.srt` |
 | `srt [--out file]` | writes the job's captions as SubRip (offline) |
+| `magnific status\|folder\|start\|stop\|sync\|pull\|place\|undo` | the Magnific watch folder: settings, the background watcher, one-off imports, saving a finished creation into the folder |
+| `magnific slots [--no-mark]` · `magnific put FILE --slot S3 [--in SEC]` | the open timeline's slots; building a creation into one (a new clip, or a take on the clip that is there) |
+| `magnific selftest --switch` | checks the Magnific watch folder and the slots against the running Resolve, in the "Flow Sandbox" project |
 | `probe --switch` | tests the Resolve API in a "Flow Sandbox" project |
 
 Jobs live in `~/.flow/jobs/<clip>/`: `analysis.json`, `review.txt`, `edit_plan.json`, `build.json`,
@@ -134,4 +152,4 @@ These can't be done through Resolve's scripting API:
 python3 -m unittest discover -s tests -v
 ```
 `test_pipeline.py` runs the real whisper pipeline on a synthetic clip (macOS `say` plus ffmpeg). Resolve
-behavior was verified with `flow probe` and sandbox builds against Resolve Studio 21.1.2.
+behavior was verified with `flow probe` and sandbox builds against Resolve Studio 21.1.2. `flow magnific selftest --switch` does the same for the Magnific watch folder (report in `~/.flow/probe/magnific_live.json`).
