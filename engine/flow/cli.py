@@ -266,6 +266,12 @@ def cmd_magnific(args):
     a, v = args.action, args.value
     if a == "watch":
         return mg.watch()
+    if a == "selftest":
+        from flow import magnific_live
+        res = magnific_live.run_live(switch=args.switch, url=args.url, creation=args.creation, name=args.name,
+                                     prompt=args.prompt, model=args.model)
+        _out(args, res, magnific_live.format_result(res))
+        return 0 if res.get("ok") else 1
     if a == "status":
         st = mg.status(resolve=not args.offline)
         _out(args, st, mg.format_status(st))
@@ -445,7 +451,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--file")
     sp.add_argument("--creation", help="the service's creation id, kept for reference")
     sp = add("magnific", cmd_magnific, "Magnific creations into Resolve through a watched folder (see flow/magnific.py)")
-    sp.add_argument("action", choices=["status", "folder", "pull", "sync", "start", "stop", "watch", "place", "undo"])
+    sp.add_argument("action", choices=["status", "folder", "pull", "sync", "start", "stop", "watch", "place", "undo",
+                                       "selftest"])
     sp.add_argument("value", nargs="?", help="folder: the folder · place: bin or playhead · start: bin or playhead")
     sp.add_argument("--all", action="store_true", help="folder/sync: also import files that were there before")
     sp.add_argument("--url", help="pull: the finished creation's https link")
@@ -461,6 +468,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--still", type=float, help="seconds a still image lasts on the timeline (default 5)")
     sp.add_argument("--interval", type=float, help="start: seconds between the watcher's looks (default 3)")
     sp.add_argument("--offline", action="store_true", help="status: don't ask Resolve which timeline is open")
+    sp.add_argument("--switch", action="store_true",
+                    help="selftest: save the open project, run in the Flow Sandbox project, switch back after")
     sp = add("edit", cmd_edit, "live edit the open Flow timeline in place (see flow/liveedit.py)")
     sp.add_argument("action", choices=["where", "zoom", "captions", "caption-text", "grade", "fx", "broll",
                                        "undo", "log"])

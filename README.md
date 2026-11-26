@@ -124,6 +124,7 @@ default.
 | `render [--codec h264\|h265\|prores] [--out dir]` | renders the job's timeline via the Deliver page, with an `.srt` |
 | `srt [--out file]` | writes the job's captions as SubRip (offline) |
 | `magnific status\|folder\|start\|stop\|sync\|pull\|place\|undo` | the Magnific watch folder: settings, the background watcher, one-off imports, saving a finished creation into the folder |
+| `magnific selftest --switch` | checks the Magnific watch folder against the running Resolve, in the "Flow Sandbox" project |
 | `probe --switch` | tests the Resolve API in a "Flow Sandbox" project |
 
 Jobs live in `~/.flow/jobs/<clip>/`: `analysis.json`, `review.txt`, `edit_plan.json`, `build.json`,
@@ -145,4 +146,4 @@ These can't be done through Resolve's scripting API:
 python3 -m unittest discover -s tests -v
 ```
 `test_pipeline.py` runs the real whisper pipeline on a synthetic clip (macOS `say` plus ffmpeg). Resolve
-behavior was verified with `flow probe` and sandbox builds against Resolve Studio 21.1.2.
+behavior was verified with `flow probe` and sandbox builds against Resolve Studio 21.1.2. `flow magnific selftest --switch` does the same for the Magnific watch folder (report in `~/.flow/probe/magnific_live.json`).

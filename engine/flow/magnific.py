@@ -10,6 +10,7 @@
     flow magnific watch                  the watcher in the foreground (what `start` runs)
     flow magnific place bin|playhead     where new creations go (bin, the media pool, is the default)
     flow magnific undo                   take the last placed creation off the timeline again
+    flow magnific selftest --switch      check all of this in the running Resolve (Flow Sandbox project)
 
 The folder is the contract. Whatever lands in it goes to Resolve: results Claude pulls from the
 Magnific MCP, downloads from the Magnific web app, exports of a Magnific automation. Flow has no
