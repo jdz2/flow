@@ -458,6 +458,19 @@ class Settings(Base):
         with self.assertRaises(FlowError):
             mg.set_folder(str(Path.home()))
 
+    def test_default_is_slots_and_only_choices_are_kept(self):
+        self.assertEqual(mg.config()["place"], "slots")
+        mg.set_place("bin")
+        cfg_file = self.home / "magnific" / "config.json"
+        self.assertEqual(json.loads(cfg_file.read_text()), {"place": "bin", "place_set": True})
+        mg.save_config(interval=5.0)
+        self.assertEqual(mg.config()["place"], "bin")                       # a choice sticks
+        # a config an earlier Flow wrote, its default "bin" saved with it, is not a choice
+        cfg_file.write_text(json.dumps({"folder": None, "place": "bin", "interval": 3.0, "still_seconds": 5.0}))
+        self.assertEqual(mg.config()["place"], "slots")
+        cfg_file.write_text(json.dumps({"place": "playhead", "still_seconds": 4}))
+        self.assertEqual(mg.config()["place"], "playhead")                  # playhead was always chosen
+
 
 # ---------------------------------------------------------------- pull
 @unittest.skipUnless(HAVE_FFMPEG, "needs ffmpeg")
@@ -543,7 +556,7 @@ class SyncToResolve(Base):
         self.assertEqual(city.meta["Keywords"], "Magnific, veo-3")
         self.assertEqual(city.meta["Description"], "City")
         self.assertEqual(city.third["Magnific Creation"], "c-9")
-        self.assertEqual(self.rs.mp.appends, [])                             # bin mode: timeline untouched
+        self.assertEqual(self.rs.mp.appends, [])                             # none made for a slot: timeline untouched
         self.assertEqual(mg.sync(connect=self.connect)["imported"], [])      # nothing twice
         self.assertEqual(mg.status()["imported"], 2)
 
@@ -936,6 +949,7 @@ class SlotBuild(Base):
         self.assertEqual(tl.playhead, 10)
 
     def test_bin_mode_says_where_it_fits_and_put_places_it(self):
+        mg.set_place("bin")
         self.tl.AddMarker(48, "Lavender", "", "harbour", 48)
         mg.slots(connect=self.connect)
         p = mg.pull(file=self.video("v1.mp4", 2), name="Harbour", slot="S1")

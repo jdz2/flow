@@ -208,10 +208,10 @@ changing; partial downloads are ignored.
    `flow magnific folder "<dir>"`. Files already in it are left alone (`flow magnific sync --all` brings them
    in). Then `flow magnific start`: a background watcher that keeps running after this chat. Say in one line
    where new creations land.
-2. **Where they go.** `flow magnific place bin` is the default: media pool only, no timeline is touched.
-   `flow magnific place slots` (only when the user asks for it) builds each creation made for a slot of the
-   open timeline straight into it (step 6); the rest waits in the media pool. `flow magnific place playhead`
-   (only when the user asks for it) does the same and also puts every other new creation on the open
+2. **Where they go.** `flow magnific place slots` is the default (the user's pick): every creation goes to
+   the media pool, and one made for a slot of the open timeline also goes straight into it (step 6). Nothing
+   else touches a timeline. `flow magnific place bin` keeps everything in the media pool. `flow magnific
+   place playhead` (only when the user asks for it) also puts every other new creation on the open
    timeline at the playhead, on its own track "Flow Magnific" (sound files on "Flow Magnific Audio"), at the
    first spot of that track that is free for its whole length. Nothing already on the timeline is moved,
    trimmed or covered. Stills last `--still` seconds (default 5). `flow magnific undo` takes the last placed
@@ -267,9 +267,9 @@ stop` ends it. The watcher's log is `~/.flow/magnific/watch.log`.
 
 - Never switch projects, delete timelines or edit the user's original timeline. Ask first if something
   would need that. (`flow probe --switch` saves the project and opens a "Flow Sandbox" project; only use
-  it with the user's OK.) Magnific's slots and playhead modes and `flow magnific put`, which the user asks
-  for, are the one exception: they only add clips on Flow's own tracks, add takes to Magnific clips, and
-  switch B-roll placeholders off.
+  it with the user's OK.) Magnific's slots mode (the default the user picked), its playhead mode and
+  `flow magnific put` are the one exception: they only add clips on Flow's own tracks, add takes to
+  Magnific clips, and switch B-roll placeholders off.
 - If Resolve refuses the connection: Preferences → System → General → External scripting using: Local
   (Studio only). On the free edition, build from inside Resolve with Workspace → Scripts → Flow Build
   after `flow compile`.
@@ -279,7 +279,7 @@ stop` ends it. The watcher's log is `~/.flow/magnific/watch.log`.
   without it.
 - Every AI generation costs the user credits: price it with `simulate_cost`, say the number, and only
   run it after a clear yes. Treat results as drafts: look at them before placing them.
-- Magnific creations go to the media pool unless the user turned on `flow magnific place slots` or
-  `place playhead`; never switch either on by yourself. `flow magnific put` only on the user's ask (asking
-  to fill a slot counts).
+- Magnific creations go to the media pool, and into the edit only when they were made for a slot (a sure
+  sign, step 6). Never guess a slot, and never switch on `flow magnific place playhead` by yourself.
+  `flow magnific put` only on the user's ask (asking to fill a slot counts).
 - Keep chat updates short. Flow's whole promise is speed.

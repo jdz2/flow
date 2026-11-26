@@ -9,8 +9,9 @@
     flow magnific sync [--all]           import what is new in the folder into Resolve, now
     flow magnific start | stop           the watcher in the background: it looks every few seconds
     flow magnific watch                  the watcher in the foreground (what `start` runs)
-    flow magnific place bin|slots|playhead
-                                         where new creations go (bin, the media pool, is the default)
+    flow magnific place slots|bin|playhead
+                                         where new creations go (slots, the default: the media pool, and
+                                         straight into their slot when they were made for one)
     flow magnific slots [--no-mark]      the open timeline's slots: where new visuals belong (S1, S2 …)
     flow magnific put FILE --slot S3 [--in SEC]
                                          build a creation into a slot now (a new clip, or a take on a filled one)
@@ -23,12 +24,13 @@ Magnific key; generations run in the Claude session (Flow skill, "4. Magnific").
 
 New files are imported into the media pool bin "Flow › Magnific", purple like AI shots, with prompt,
 model and creation id in the clip's metadata (so `flow broll --bin Magnific` can match them by what
-they show). With `place slots` a creation made for a slot of the open timeline (pulled with --slot,
-named "S3 …", or pulled with --version-of a creation in the edit) also goes into that slot: a new clip
-for an open one, a take on the clip of a filled one (see magnific_slots.py); the rest waits in the
-media pool. `place playhead` does the same and puts the rest onto the open timeline at the playhead, on
-its own track ("Flow Magnific"; audio on "Flow Magnific Audio") at the first free spot of that track.
-Nothing already on the timeline is moved, trimmed or covered, and `undo` takes the last one back.
+they show). In `place slots`, the default, a creation made for a slot of the open timeline (pulled with
+--slot, named "S3 …", or pulled with --version-of a creation in the edit) also goes into that slot: a
+new clip for an open one, a take on the clip of a filled one (see magnific_slots.py); the rest waits in
+the media pool. `place bin` keeps everything in the media pool. `place playhead` (opt-in) does what
+slots does and puts the rest onto the open timeline at the playhead, on its own track ("Flow Magnific";
+audio on "Flow Magnific Audio") at the first free spot of that track. Nothing already on the timeline is
+moved, trimmed or covered, and `undo` takes the last one back.
 
 A file is imported once it has stopped changing (same size and time on two looks a few seconds
 apart) and reads as media; partial downloads (.part, .crdownload, Safari's .download) and hidden
@@ -63,8 +65,8 @@ CONVERT_EXT = {".webp"}            # Resolve can't read WebP; Flow puts a PNG ne
 PARTIAL_EXT = {".part", ".crdownload", ".download", ".tmp", ".partial", ".opdownload"}
 SETTLE = 2.0                       # seconds a new file must stay unchanged before it is imported
 GIVE_UP = 120.0                    # a file that still doesn't read as media after this is skipped
-DEFAULTS = {"folder": None, "place": "bin", "interval": 3.0, "still_seconds": 5.0}
-PLACES = ("bin", "slots", "playhead")
+DEFAULTS = {"folder": None, "place": "slots", "interval": 3.0, "still_seconds": 5.0}
+PLACES = ("bin", "slots", "playhead")   # slots is the default (Jan's pick, 2026-11-26: sure matches by themselves)
 CONTENT_TYPES = {
     "video/quicktime": ".mov", "video/mp4": ".mp4", "video/x-m4v": ".m4v", "video/webm": ".webm",
     "video/x-matroska": ".mkv", "image/png": ".png", "image/jpeg": ".jpg", "image/tiff": ".tif",
@@ -125,18 +127,29 @@ class _Lock:
         return False
 
 
+def _saved() -> dict:
+    """What the user set (config.json keeps only that, so a new default reaches everyone who didn't)."""
+    saved = _load("config.json", {})
+    if saved.get("place") == "bin" and not saved.get("place_set"):
+        saved.pop("place")        # written as the old default by an earlier Flow, not chosen
+    return saved
+
+
 def config() -> dict:
     cfg = dict(DEFAULTS)
-    cfg.update(_load("config.json", {}))
+    cfg.update(_saved())
     return cfg
 
 
 def save_config(**changes: Any) -> dict:
-    cfg = config()
-    cfg.update({k: v for k, v in changes.items() if v is not None})
+    saved = _saved()
+    saved.update({k: v for k, v in changes.items() if v is not None})
+    if changes.get("place") is not None:
+        saved["place_set"] = True
+    cfg = {**DEFAULTS, **saved}
     if cfg["place"] not in PLACES:
         raise FlowError(f"place must be {' or '.join(PLACES)}")
-    _save("config.json", cfg)
+    _save("config.json", saved)
     return cfg
 
 
@@ -1074,8 +1087,10 @@ def start(where: Optional[str] = None, interval: Optional[float] = None,
         raise FlowError(f"The watcher stopped right away. See {log_file()}")
     return {"running": True, "pid": proc.pid, "folder": str(root), "place": cfg["place"], "started": True,
             "baseline": base, "log": str(log_file()),
-            "say": f"Watching {root} · new creations → " + ("media pool bin Flow › Magnific" if cfg["place"] == "bin"
-                                                            else "media pool + the open timeline at the playhead")
+            "say": f"Watching {root} · new creations → " + {
+                "bin": "media pool bin Flow › Magnific",
+                "slots": "media pool, and into their slot when they were made for one",
+                "playhead": "media pool, into their slot, or else onto the open timeline at the playhead"}[cfg["place"]]
                    + (f" · {base} file(s) already there were left alone (`flow magnific sync --all` imports them)"
                       if base else "")}
 

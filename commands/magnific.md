@@ -13,10 +13,10 @@ The engine is `~/.flow/flow` (fallback: `${CLAUDE_PLUGIN_ROOT}/bin/flow`). Follo
 - a folder path: `flow magnific folder "<path>"`, then `flow magnific start`.
 - `slots`: `flow magnific slots`, the open timeline's slots (S1, S2 …: B-roll markers, B-roll placeholders,
   Magnific clips already in the edit). Show them as a short list: id, time, what it asks for, open or filled.
-- `auto`, `playhead` or `bin`: where new creations go. `flow magnific place slots` (a creation made for a
-  slot goes straight into it; the rest waits in the media pool), `flow magnific place playhead` (the rest
-  also goes onto the open timeline at the playhead, on its own track) or `flow magnific place bin` (media
-  pool only, the default). A running watcher picks it up by itself.
+- `auto`, `playhead` or `bin`: where new creations go. `flow magnific place slots` (the default: a creation
+  made for a slot goes straight into it, the rest waits in the media pool), `flow magnific place playhead`
+  (the rest also goes onto the open timeline at the playhead, on its own track) or `flow magnific place bin`
+  (media pool only). A running watcher picks it up by itself.
 - `put <file> <slot>`: `flow magnific put "<file>" --slot S3` builds that creation into the slot now (a new
   clip in an open slot, a new take on the clip of a filled one).
 - `off`: `flow magnific stop`. `status`: `flow magnific status`. `undo`: `flow magnific undo`.
