@@ -2,7 +2,7 @@
   "id": "clean",
   "order": 1,
   "name": "Clean",
-  "description": "One-word captions, premium type, clean and minimal.",
+  "description": "One word at a time, small lower-case type, no zooms or effects.",
   "pacing": {
     "max_gap": 0.25,
     "pad_in": 0.06,
@@ -30,12 +30,12 @@
     "outline": null,
     "shadow": {
       "color": "#000000",
-      "opacity": 0.35,
+      "opacity": 0.55,
       "offset": [
         0.0,
         -0.004
       ],
-      "softness": 0.04
+      "softness": 0.07
     },
     "box": null,
     "position": [
@@ -44,8 +44,8 @@
     ],
     "animation": "fade",
     "tracking": 1.0,
-    "min_frames": 6,
-    "hold": 0.25
+    "min_frames": 8,
+    "hold": 0.3
   },
   "hook": {
     "enabled": false,
@@ -59,10 +59,10 @@
     "outline": null,
     "position": [
       0.5,
-      0.74
+      0.8
     ],
     "animation": "pop",
-    "max_chars_per_line": 18
+    "max_chars_per_line": 20
   },
   "zoom": {
     "mode": "none"

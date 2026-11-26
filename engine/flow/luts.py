@@ -58,10 +58,15 @@ def fade(x: float, black: float, white: float) -> float:
     return black + x * (white - black)
 
 
-def split_tone(c: RGB, shadow: RGB, highlight: RGB, amount: float = 1.0) -> RGB:
+def split_tone(c: RGB, shadow: RGB, highlight: RGB, amount: float = 1.0, protect: bool = True) -> RGB:
+    """Additive shadow/highlight tint. With `protect`, the tint fades out at pure black and pure
+    white, so the black point stays black and white stays white (no navy blacks, no cream whites)."""
     y = luma(*c)
     hw = smoothstep(0.35, 0.9, y)
     sw = 1.0 - smoothstep(0.1, 0.55, y)
+    if protect:
+        sw *= smoothstep(0.0, 0.06, y)
+        hw *= 1.0 - smoothstep(0.92, 1.0, y)
     return tuple(  # type: ignore[return-value]
         c[i] + amount * (shadow[i] * sw + highlight[i] * hw) for i in range(3)
     )
@@ -94,18 +99,29 @@ def look_identity(c: RGB) -> RGB:
 
 
 def look_natural(c: RGB) -> RGB:
-    c = per_channel(c, lambda x: s_curve(x, 0.12))
-    c = saturate(c, 1.08)
-    return (c[0] * 1.008, c[1], c[2] * 0.992)
+    # Contrast on luma only (a per-channel curve also pumps saturation), a touch of saturation,
+    # no tint: "natural" must be safe on any skin and keep white white.
+    y = luma(*c)
+    if y > 1e-4:
+        k = s_curve(y, 0.08, 0.40) / y
+        c = (c[0] * k, c[1] * k, c[2] * k)
+        mx = max(c)
+        if mx > 1.0:  # pull overflowing channels toward luma instead of hard-clipping hue
+            yy = luma(*c)
+            t = (mx - 1.0) / max(1e-4, mx - yy)
+            c = tuple(v + (yy - v) * t for v in c)  # type: ignore[assignment]
+    return saturate(c, 1.03)
 
 
 def look_orange_teal(c: RGB) -> RGB:
     c = per_channel(c, lambda x: s_curve(x, 0.22))
     # Pull blues/cyans/greens toward teal and protect/enrich skin.
-    c = hue_shift_toward(c, 70, 260, 188, 0.55, 1.05)
-    c = hue_shift_toward(c, 5, 55, 28, 0.35, 1.10)
+    # Only cyan/blue go teal (foliage keeps its green; the Greens mask handles it), skin is
+    # nudged to orange without extra saturation.
+    c = hue_shift_toward(c, 150, 260, 192, 0.5, 1.0)
+    c = hue_shift_toward(c, 5, 50, 24, 0.25, 1.0)
     c = split_tone(c, shadow=(-0.035, 0.012, 0.045), highlight=(0.045, 0.012, -0.04))
-    return saturate(c, 1.06)
+    return c
 
 
 def look_film(c: RGB) -> RGB:
@@ -147,7 +163,8 @@ def look_bw(c: RGB) -> RGB:
 def look_vintage(c: RGB) -> RGB:
     c = per_channel(c, lambda x: s_curve(x, 0.15))
     c = per_channel(c, lambda x: fade(x, 0.07, 0.93))
-    c = split_tone(c, shadow=(0.02, -0.005, 0.03), highlight=(0.035, 0.03, -0.035))
+    # warm-brown lifted blacks (the old violet shadow tint read as purple on the lifted black)
+    c = split_tone(c, shadow=(0.018, 0.01, -0.004), highlight=(0.035, 0.03, -0.035))
     return saturate(c, 0.82)
 
 
@@ -265,7 +282,7 @@ def nightlife_transform(keep_green: bool = False, warm: float = 0.0, skin_boost:
         c2 = per_channel((r2, g2, b2), lambda x: s_curve(x, 0.14 - 0.04 * soft, 0.42))
         tint = (1.0 + 1.5 * warm) * (1.0 - sk)
         c2 = split_tone(c2, shadow=(-0.02 * tint, 0.012 * tint, 0.016 * tint),
-                        highlight=(0.03, 0.012, -0.022))
+                        highlight=(0.03, 0.012, -0.022), protect=False)
         c2 = per_channel(c2, lambda x: fade(x, 0.008, 0.99))
         if sk > 0.001:  # rebuild skin on the orange skin line
             hs, ls, ss = colorsys.rgb_to_hls(clamp(c2[0]), clamp(c2[1]), clamp(c2[2]))
@@ -343,26 +360,31 @@ def balance_from_stats(color: dict, strength: float = 0.6) -> dict:
     cr = float(color.get("cr", 0.0))
     sat_avg = float(color.get("sat_avg", 0.25))
 
-    # Levels: stretch toward 0.03..0.94 (only ever partially).
-    lo_t, hi_t = 0.03, 0.94
+    # Levels. y_low / y_high are the 10th / 90th luma percentiles (signalstats YLOW/YHIGH), not the
+    # black and white points, so the targets sit inside the range and the stretch is mild.
+    # Blacks are never lifted.
+    lo_t, hi_t = 0.07, 0.86
     span = max(0.2, y_high - y_low)
-    gain = clamp((hi_t - lo_t) / span, 0.85, 1.35)
+    gain = clamp((hi_t - lo_t) / span, 0.92, 1.15)
     gain = lerp(1.0, gain, strength)
-    lift = lerp(0.0, lo_t - y_low * gain, strength)
+    lift = min(0.0, lerp(0.0, lo_t - y_low * gain, strength))
 
-    # Exposure toward a mid-grey-ish average.
+    # Exposure toward a mid-grey-ish average, with a dead band so well exposed clips are left alone.
     mid_after = y_avg * gain + lift
     power = 1.0
-    if mid_after > 0.02:
-        target = 0.46
+    target = 0.42
+    if mid_after > 0.02 and abs(mid_after - target) >= 0.06:
         p = math.log(target) / math.log(clamp(mid_after, 0.05, 0.95))
         power = lerp(1.0, clamp(p, 0.8, 1.25), strength)
 
-    # White balance: remove part of the average chroma cast (BT.709 YCbCr->RGB).
-    k = strength * 0.8
+    # White balance: remove part of the average chroma cast (BT.709 YCbCr->RGB). Done as per-channel
+    # slope, not offset, so black stays neutral; kept gentle because the cast is a whole-frame average
+    # (a sunset or a park is not a cast).
+    k = strength * 0.4
     dr = -k * (1.5748 * cr)
     dg = -k * (-0.1873 * cb - 0.4681 * cr)
     db = -k * (1.8556 * cb)
+    ref = max(mid_after, 0.25)
 
     sat = 1.0
     if sat_avg < 0.12:
@@ -370,8 +392,8 @@ def balance_from_stats(color: dict, strength: float = 0.6) -> dict:
     elif sat_avg > 0.45:
         sat = lerp(1.0, 0.92, strength)
 
-    slope = (round(gain, 4),) * 3
-    offset = tuple(round(clamp(lift + d, -0.15, 0.15), 4) for d in (dr, dg, db))
+    slope = tuple(round(clamp(gain * (1.0 + d / ref), 0.7, 1.4), 4) for d in (dr, dg, db))
+    offset = (round(clamp(lift, -0.15, 0.15), 4),) * 3
     return {
         "slope": list(slope),
         "offset": list(offset),
@@ -402,6 +424,19 @@ def build_transform(look: Optional[str], intensity: float = 1.0,
         return tuple(clamp(c[i] + (graded[i] - c[i]) * intensity) for i in range(3))  # type: ignore
 
     return tf
+
+
+_PROBES = [(0.0, 0.0, 0.0), (1.0, 1.0, 1.0), (0.18, 0.18, 0.18), (0.5, 0.5, 0.5), (0.8, 0.55, 0.42),
+           (0.45, 0.3, 0.22), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0), (0.3, 0.55, 0.2),
+           (0.4, 0.6, 0.9), (0.64, 0.64, 0.27), (0.6, 0.2, 0.7), (0.05, 0.05, 0.08)]
+
+
+def transform_rev(transform: Callable[[RGB], RGB]) -> str:
+    """Short fingerprint of a transform's output. Cached LUT names carry it, so changing a look's
+    math writes new files instead of silently reusing stale ones."""
+    import hashlib
+    vals = [round(v, 5) for p in _PROBES for v in transform(p)]
+    return hashlib.sha1(repr(vals).encode()).hexdigest()[:5]
 
 
 def write_cube(path: Path, transform: Callable[[RGB], RGB], title: str, size: int = LUT_SIZE) -> Path:

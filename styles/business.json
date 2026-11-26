@@ -2,7 +2,7 @@
   "id": "business",
   "order": 4,
   "name": "Business",
-  "description": "Polished and professional for brands.",
+  "description": "Boxed sentence-case captions, subtle punch-ins, natural grade. For brands.",
   "pacing": {
     "max_gap": 0.3,
     "pad_in": 0.07,
@@ -35,7 +35,7 @@
     },
     "position": [
       0.5,
-      0.24
+      0.28
     ],
     "animation": "fade",
     "tracking": 1.0,
@@ -51,16 +51,16 @@
     "case": "none",
     "color": "#FFFFFF",
     "box": {
-      "color": "#2F6BFF",
+      "color": "#2459E0",
       "opacity": 1.0
     },
     "outline": null,
     "position": [
       0.5,
-      0.74
+      0.8
     ],
     "animation": "pop",
-    "max_chars_per_line": 18
+    "max_chars_per_line": 20
   },
   "zoom": {
     "mode": "auto",
@@ -76,13 +76,10 @@
     "auto": []
   },
   "masks": {
-    "auto": [
-      "vignette@all"
-    ]
+    "auto": []
   },
   "transitions": {
-    "type": "smooth_cut",
-    "frames": 4
+    "type": "none"
   },
   "grade": {
     "look": "natural",

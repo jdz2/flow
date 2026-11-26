@@ -19,9 +19,8 @@ from typing import Any, Dict, List, Optional
 from flow import luts, paths
 from flow.util import which
 
-# bump when a look's math changes, so older timelines keep their own LUT files
-LOOK_REV = {"nightlife": "5"}
-SOFT_REV = "3"   # bump when the soft variant's math changes
+# Cached LUT names carry luts.transform_rev (a fingerprint of the look's output), so changing a
+# look's math writes new files and older timelines keep their own.
 
 LUT_ROOTS = [paths.RESOLVE_LUT_DIR,
              Path.home() / "Library" / "Application Support" / "Blackmagic Design" / "DaVinci Resolve" / "LUT"]
@@ -46,6 +45,16 @@ def find_lut_file(name: str) -> Optional[Path]:
     return None
 
 
+# <base stem>_<4-hex path hash>__<look>-r<rev>_<intensity>[...].cube (older files: <look><n>_<intensity>)
+COMPOSED_RE = re.compile(r"^(.+?)_([0-9a-f]{4})__[a-z][a-z0-9-]*_\d+.*\.cube$")
+
+
+def _is_flow_look(name: str) -> bool:
+    """Flow_<look>.cube: a plain Flow look with no clip LUT behind it."""
+    stem = Path(name).name
+    return stem.startswith("Flow_") or stem.startswith("Flow ")
+
+
 def split_composed(name: str) -> Optional[Path]:
     """The clip's own LUT behind a node-1 LUT: Flow's per-clip LUTs bake the clip's conversion
     LUT and the look into one file named <base stem>_<hash>__<look>.cube. Returns the base LUT
@@ -55,7 +64,7 @@ def split_composed(name: str) -> Optional[Path]:
     stem = Path(name).name
     if stem.startswith("Flow_") or stem.startswith("Flow "):
         return None
-    m = re.match(r"^(.+)_([0-9a-f]{4})__[A-Za-z]+\d*_\d+.*\.cube$", stem)
+    m = COMPOSED_RE.match(stem)
     if not m:
         return find_lut_file(name)
     want_stem, want_hash = m.group(1), m.group(2)
@@ -119,7 +128,7 @@ def params_for(stats: Dict[str, float], lo: float = 0.6, hi: float = 1.0, keep_g
     warm_amt = max(0.0, min(1.0, (stats.get("warm", 0.0) - 0.25) / 0.45))
     warm_amt = max(warm_amt, max(0.0, min(1.0, (stats.get("cast_rb", 0.0) - 0.08) / 0.2)))
     harsh = stats.get("harsh", 0.0) - (stats.get("green", 0.0) if keep_green else 0.0)
-    strength = max(lo + 1.4 * harsh, 0.6 + 0.4 * warm_amt)
+    strength = max(lo + 1.4 * harsh, lo + (hi - lo) * warm_amt)
     return {"strength": round(max(lo, min(hi, strength)), 2), "warm": round(warm_amt, 2), "keep_green": keep_green}
 
 
@@ -135,8 +144,8 @@ def lut_for(look: str, intensity: float, base_lut: Optional[Path], out_dir: Path
     sq = round(round(soft / 0.1) * 0.1, 1)
     fn = luts.nightlife_transform(keep_green=keep_green, warm=wq, soft=sq) if look == "nightlife" else None
     tf = luts.build_transform(look, q, fn=fn)
-    tag = (f"{look}{LOOK_REV.get(look, '')}_{int(q * 100)}" + (f"_w{int(wq * 10)}" if wq else "")
-           + ("_g" if keep_green else "") + (f"_soft{int(sq * 10)}r{SOFT_REV}" if sq else ""))
+    tag = (f"{look}-r{luts.transform_rev(tf)}_{int(round(q * 100))}" + (f"_w{int(round(wq * 10))}" if wq else "")
+           + ("_g" if keep_green else "") + (f"_soft{int(round(sq * 10))}" if sq else ""))
     if base_lut is not None:
         stem = re.sub(r"[^A-Za-z0-9]+", "_", base_lut.stem)[:40]
         h = hashlib.sha1(str(base_lut).encode()).hexdigest()[:4]
@@ -190,9 +199,10 @@ def grade_clips(project: Any, items: List[tuple], look: str, out_dir: Path, lo: 
             rows.append(row)
             continue
         base_name = g.GetLUT(1) or ""
-        base = find_lut_file(base_name) if base_name else None
+        # a Flow per-clip LUT from an earlier run bakes base + look: grade from its base, not on top of it
+        base = split_composed(base_name) if base_name else None
         row["base_lut"] = base_name or None
-        if base_name and base is None:
+        if base_name and base is None and not _is_flow_look(base_name):
             row["status"] = f"existing LUT {base_name} not found on disk; left as is"
             rows.append(row)
             continue
@@ -278,11 +288,27 @@ def measure_neutral(item: Any, out_dir: Path, label: str) -> Dict[str, Any]:
                 pass
 
 
+def timeline_aspect(project: Any) -> float:
+    """Width / height of the current timeline (mask windows are sized in frame units), 16:9 if unknown."""
+    try:
+        tl = project.GetCurrentTimeline()
+        w = float(tl.GetSetting("timelineResolutionWidth") or 0) if tl else 0.0
+        h = float(tl.GetSetting("timelineResolutionHeight") or 0) if tl else 0.0
+        if not w or not h:
+            w = float(project.GetSetting("timelineResolutionWidth") or 0)
+            h = float(project.GetSetting("timelineResolutionHeight") or 0)
+        if w > 0 and h > 0:
+            return w / h
+    except Exception:
+        pass
+    return 16 / 9
+
+
 def grade_clips_masked(project: Any, items: List[tuple], out_dir: Path, look: Optional[str] = None,
                        reference: Optional[str] = None, masks_cfg: Any = True,
                        subjects: Optional[Dict[str, List[float]]] = None, vignette: Optional[float] = None,
                        ref_strength: Optional[dict] = None, replace: bool = False, on_clip: Any = None,
-                       lo: float = 0.6, hi: float = 1.0) -> Dict[str, Any]:
+                       lo: float = 0.6, hi: float = 1.0, soft: float = 0.0) -> Dict[str, Any]:
     """Grade every clip with the mask tree (flow.masks): 01 Input keeps the clip's own conversion LUT,
     04 Look gets the reference match (one LUT for the whole timeline, built from all clips) or the named
     Flow look, and the rule set fills Skin / Greens / Highlights / Sky / Subject / Vignette per clip.
@@ -317,7 +343,7 @@ def grade_clips_masked(project: Any, items: List[tuple], out_dir: Path, look: Op
             rows.append(row)
             continue
         base_name = g.GetLUT(1) or ""
-        base = find_lut_file(base_name) if base_name else None
+        base = split_composed(base_name) if base_name else None
         row["base_lut"] = base_name or None
         slug = _re.sub(r"[^A-Za-z0-9#]+", "_", label)
         stats = measure_neutral(it, out_dir / "frames", slug)
@@ -337,6 +363,7 @@ def grade_clips_masked(project: Any, items: List[tuple], out_dir: Path, look: Op
     sky_target = (ref_info or {}).get("sky")
     key = luts.normalize_look(look) if look and look != "reference" else None
     seen_luts: set = set()
+    aspect = timeline_aspect(project)
     for label, it, row, base, slug in todo:
         if on_clip:
             on_clip(label, it)
@@ -346,11 +373,13 @@ def grade_clips_masked(project: Any, items: List[tuple], out_dir: Path, look: Op
         elif key:
             prm = params_for(stats, lo, hi)
             row.update(prm)
-            look_path = lut_for(key, prm["strength"], None, lut_dir, warm=prm["warm"], keep_green=prm["keep_green"])
+            look_path = lut_for(key, prm["strength"], None, lut_dir, warm=prm["warm"], keep_green=prm["keep_green"],
+                                soft=soft)
         else:
             look_path = None
         reg = masks.regions(masks.load_rgb(Path(stats["frame"]))) if stats.get("frame") else {}
-        dec = masks.decide(reg, rules, subject_hint=subjects.get(label), sky_target=sky_target)
+        dec = masks.decide(reg, rules, subject_hint=subjects.get(label), sky_target=sky_target,
+                            aspect=aspect)
         for lab in ("Skin", "Greens", "Highlights"):           # write every new qualifier LUT before applying
             op = dec["ops"].get(lab)
             if op:
@@ -362,7 +391,8 @@ def grade_clips_masked(project: Any, items: List[tuple], out_dir: Path, look: Op
             seen_luts.add(str(look_path))
             project.RefreshLUTList()
         res = masks.apply(it, project, nodetree.TEMPLATE, dec["ops"], drx_dir / f"{slug}.drx", mask_lut_dir,
-                          input_lut=str(base) if base else None, look_lut=str(look_path) if look_path else None)
+                          input_lut=str(base) if base else None, look_lut=str(look_path) if look_path else None,
+                          aspect=aspect)
         row["regions"] = reg
         row["masks"] = {k: v for k, v in dec["why"].items()}
         row["mask_nodes_on"] = sorted(dec["ops"])

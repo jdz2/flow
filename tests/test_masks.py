@@ -84,6 +84,8 @@ class MaskRules(unittest.TestCase):
         h = masks.qualifier_transform("highlights", masks.RULES["highlights"])
         self.assertEqual(h((0.3, 0.3, 0.3)), (0.3, 0.3, 0.3))
         self.assertLess(h((1.0, 1.0, 1.0))[2], 1.0)          # top end rolled off
+        for v in (0.82, 0.86, 0.9, 0.95):                     # the shoulder never brightens
+            self.assertLessEqual(h((v, v, v))[1], v + 1e-9)
 
 
 @unittest.skipUnless(drx.zstd_available() and nodetree.TEMPLATE.exists(), "needs zstd and the node template")
