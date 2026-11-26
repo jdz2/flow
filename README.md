@@ -22,9 +22,19 @@ timeline: titles, cinematic touches, slow-mo, looks and B-roll.
 - Homebrew. The installer adds `ffmpeg`, `whisper-cpp` and `zstd` if they're missing.
 
 ## Install
+In Terminal:
 ```bash
-cd ~/Desktop/Flow && ./install.sh
+git clone https://github.com/jdz2/flow.git ~/Flow
+cd ~/Flow && ./install.sh
 ```
+Then:
+1. In DaVinci Resolve Studio, set Preferences → System → General → **External scripting using: Local**,
+   and restart Resolve.
+2. Restart Claude (desktop app or Claude Code), open a project in Resolve, and type `/flow`.
+
+To update later: `cd ~/Flow && git pull && ./install.sh`. Use one install method: `install.sh` sets up
+the engine, the `/flow` skill and the `/flow-…` commands, so you don't also need the plugin.
+
 The installer:
 - downloads the Whisper model (`ggml-large-v3-turbo-q5_0`, ~570 MB) to `~/.flow/models`
 - writes the Flow looks into Resolve's `LUT/Flow` folder

@@ -14,8 +14,15 @@ ln -sf "$ROOT/bin/flow" "$FLOW_HOME/flow"
 printf '%s\n' "$ROOT/engine" > "$FLOW_HOME/engine_path"
 chmod +x "$ROOT/bin/flow"
 
+if ! command -v brew >/dev/null 2>&1; then
+  if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v whisper-cli >/dev/null 2>&1; then
+    echo "Flow needs Homebrew to install ffmpeg and whisper.cpp. Install it from https://brew.sh," >&2
+    echo "then run ./install.sh again." >&2
+    exit 1
+  fi
+fi
 command -v ffmpeg >/dev/null 2>&1 || { say "Installing ffmpeg"; brew install ffmpeg; }
-command -v zstd >/dev/null 2>&1 || { say "Installing zstd (reference-matched mask grades)"; brew install zstd || true; }
+command -v zstd >/dev/null 2>&1 || { say "Installing zstd (reference-matched mask grades)"; brew install zstd 2>/dev/null || true; }
 if ! command -v whisper-cli >/dev/null 2>&1; then
   say "Installing whisper.cpp"
   brew install whisper-cpp
