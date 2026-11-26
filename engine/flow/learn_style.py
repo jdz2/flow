@@ -39,12 +39,17 @@ def _text_props(item: Any) -> Optional[dict]:
         return {
             "text": txt, "font": tool.GetInput("Font"), "font_style": tool.GetInput("Style"),
             "size": float(tool.GetInput("Size", end) or 0.07),
-            "color": _rgb_hex(tool.GetInput("Red1") or 1, tool.GetInput("Green1") or 1, tool.GetInput("Blue1") or 1),
+            "color": _rgb_hex(*(_num(tool.GetInput(k), 1.0) for k in ("Red1", "Green1", "Blue1"))),
             "outline": bool(tool.GetInput("Enabled2")), "box": bool(tool.GetInput("Enabled4")),
             "position": [float(center.get(1, 0.5)), float(center.get(2, 0.3))] if isinstance(center, dict) else None,
         }
     except Exception:
         return None
+
+
+def _num(v, default: float) -> float:
+    """A Text+ input as a float; 0.0 is a real value (black), only a missing input gets the default."""
+    return default if v is None else float(v)
 
 
 def learn_from_timeline(name: str, base: str = "talking-head", save: bool = True) -> dict:

@@ -298,7 +298,8 @@ def apply(plan_path: Optional[Path] = None, live: Any = None) -> dict:
                                            vignette=gc.get("vignette"), ref_strength=gc.get("reference_strength"),
                                            replace=bool(gc.get("replace_existing", False)),
                                            on_clip=_on_clip if live.enabled else None,
-                                           lo=float(gc.get("min", 0.6)), hi=float(gc.get("max", 1.0)))
+                                           lo=float(gc.get("min", 0.6)), hi=float(gc.get("max", 1.0)),
+                                           soft=float(gc.get("soft", 0.0)))
             grade_rows = out["rows"]
             if out.get("reference"):
                 write_json(plan_path.parent / "reference_match.json", out["reference"])

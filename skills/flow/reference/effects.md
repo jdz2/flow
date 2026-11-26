@@ -26,14 +26,18 @@
 `center` is in Fusion space: x 0..1 from the left, **y 0..1 from the bottom**. Flow fills it in from
 `subject` when you leave it out.
 
-Style auto rules (in a style's `effects.auto` / `masks.auto`): `shake@emphasis`, `flash@hook_end`,
-`blur_in@start`, and `<type>@all` (e.g. `grain@all`, `letterbox@all`, `vignette@all`).
+Style auto rules (in a style's `effects.auto` / `masks.auto`): `shake@emphasis` (on emphasised words,
+capped by `effects.max_per_minute`), `flash@hook_end` (where the hook title ends), `blur_in@start` (the
+first frames), and `<type>@all` (the whole timeline, e.g. `grain@all`, `letterbox@all`, `vignette@all`).
+`effects.intensity` scales every auto effect. No built-in style uses flash or letterbox any more; add
+them in a custom style or per edit. Letterbox on a 9:16 reel throws away a lot of a narrow frame.
 
 ## Speed
 - `ramps`: bell-shaped speed ramp (100% → peak → 100%) through a non-speech moment, with optical flow
   (plus Speed Warp on Studio).
 - `slowmo`: constant slow motion (5–99%) over a non-speech moment.
-- `speed`: global talking speed (e.g. 1.08) with pitch correction.
+- `speed`: global talking speed (e.g. 1.04) with pitch correction. Above ~1.05 voices start to sound
+  processed and lips judder.
 - Cinematic style: `ramps.auto` ramps through natural pauses ≥ 1 s instead of cutting them.
 
 ## Titles system

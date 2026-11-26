@@ -50,12 +50,12 @@ RULES: Dict[str, Dict[str, Any]] = {
     # Vignette: inverted ellipse that follows the subject, so the darkening never sits on the subject.
     "vignette": {"on": True, "amount": 0.22, "follow": 0.6, "radius": 0.62},
     # Greens: foliage pulled toward the look's olive and desaturated (the classic "make it come together").
-    "greens": {"on": True, "min_area": 0.04, "hue": 55.0, "sat": 0.62, "luma": 0.94, "strength": 0.85},
+    "greens": {"on": True, "min_area": 0.04, "hue": 75.0, "sat": 0.62, "luma": 0.94, "strength": 0.85},
     # Skin: skin hues pulled to the skin line (~22°) with saturation kept in a natural band.
     # (above max_area the "skin" is warm light on road/grass/walls, not people)
     "skin": {"on": True, "min_area": 0.012, "max_area": 0.15, "hue": 22.0, "sat_lo": 0.22, "sat_hi": 0.55, "strength": 0.6},
     # Highlights: soft knee on the top end + warm tint, so bright skies and headlights don't clip harshly.
-    "highlights": {"on": True, "min_area": 0.015, "knee": 0.8, "tint": [1.03, 1.0, 0.95], "strength": 0.7},
+    "highlights": {"on": True, "min_area": 0.015, "knee": 0.8, "tint": [1.015, 1.0, 0.975], "strength": 0.7},
 }
 
 
@@ -272,7 +272,7 @@ def qualifier_transform(kind: str, p: Dict[str, Any]):
         m = _key(h, 70, 165, 18) * luts.smoothstep(0.08, 0.22, s) * luts.smoothstep(0.04, 0.12, l) * k
         if m <= 0:
             return c
-        nh =h + ((p["hue"] - h + 180) % 360 - 180) * 0.75 * m
+        nh = h + ((p["hue"] - h + 180) % 360 - 180) * 0.5 * m
         ns = s * (1 + (p["sat"] - 1) * m)
         nl = l * (1 + (p["luma"] - 1) * m)
         r, g, b = colorsys.hls_to_rgb((nh % 360) / 360, luts.clamp(nl), luts.clamp(ns))
@@ -295,12 +295,11 @@ def qualifier_transform(kind: str, p: Dict[str, Any]):
         m = luts.smoothstep(knee - 0.1, 1.0, y) * k
         if m <= 0:
             return c
-        # soft shoulder: compress above the knee
+        # soft shoulder: slope 1 at the knee, then compresses (never brightens), 1.0 -> ~0.97
         def sh(v):
             if v <= knee:
                 return v
-            t = (v - knee) / (1 - knee)
-            return knee + (1 - knee) * (1 - (1 - t) ** 2) * 0.92
+            return knee + (v - knee) / (1.0 + (v - knee) / 1.14)
         t = p.get("tint", [1, 1, 1])
         return tuple(luts.clamp(luts.lerp(v, sh(v) * t[i], m)) for i, v in enumerate(c))
 

@@ -169,6 +169,36 @@ class TestCompile(unittest.TestCase):
                 self.assertTrue(0 <= f["lf0"] < f["lf1"] <= fc.vrange(s)[1])
 
 
+class TestCaptionText(unittest.TestCase):
+    def test_lower_keeps_i_and_acronyms(self):
+        self.assertEqual(fc.transform_text("I'm", "lower", True), "I'm")
+        self.assertEqual(fc.transform_text("The AI", "lower", True), "the AI")
+        self.assertEqual(fc.transform_text("Hello,", "lower", True), "hello")
+
+    def test_strip_keeps_internal_periods(self):
+        self.assertEqual(fc.transform_text("U.S.", "none", True), "U.S.")
+        self.assertEqual(fc.transform_text("3.5", "none", True), "3.5")
+        self.assertEqual(fc.transform_text("so—", "none", True), "so")
+
+    def test_accent_only_on_emphasis_word_with_two_word_chunks(self):
+        words = W([("this", 0.0, 0.2), ("is", 0.2, 0.4), ("huge", 0.4, 0.8), ("news", 0.8, 1.2)])
+        rec = [dict(w, f0=int(w["start"] * 30), f1=int(w["end"] * 30)) for w in words]
+        cfg = {"max_words": 2, "max_chars": 20, "highlight_emphasis": True, "accent": "#FFE500"}
+        ch = fc.chunk_captions(rec, cfg, {2}, 30.0, 60)
+        acc = [c["text"] for c in ch if c["accent"]]
+        self.assertEqual(acc, ["huge"])
+        off = fc.chunk_captions(rec, dict(cfg, highlight_emphasis=False), {2}, 30.0, 60)
+        self.assertFalse(any(c["accent"] for c in off))
+        self.assertTrue(ch[0]["handoff"])
+        self.assertFalse(ch[-1]["handoff"])
+
+    def test_long_caption_shrinks_to_fit(self):
+        from flow.captions import fit_scale
+        big = {"size": 0.09, "font_style": "Black", "outline": {"width": 0.07}}
+        self.assertLess(fit_scale("WHAT HAPPENED?", big), 1.0)
+        self.assertEqual(fit_scale("hi", big), 1.0)
+
+
 class TestSplitEdits(unittest.TestCase):
     def plan(self, **kw):
         p = {"style": "talking-head", "remove": [{"words": [3, 5], "reason": "restart"}], "hook": False,
@@ -591,11 +621,61 @@ class TestLuts(unittest.TestCase):
     def test_balance_neutralizes_cast(self):
         cdl = luts.balance_from_stats({"y_avg": 0.4, "y_low": 0.05, "y_high": 0.9, "cb": -0.05, "cr": 0.06,
                                        "sat_avg": 0.2})
-        self.assertLess(cdl["offset"][0], cdl["offset"][2])  # warm/red cast -> pull red down vs blue
+        self.assertLess(cdl["slope"][0], cdl["slope"][2])  # warm/red cast -> pull red down vs blue
+        self.assertEqual(len(set(cdl["offset"])), 1)        # WB is slope, so black stays neutral
+
+    def test_balance_keeps_highlights(self):
+        # dark clip measured by percentiles: the stretch must not clip the top end or lift blacks
+        cdl = luts.balance_from_stats({"y_avg": 0.2, "y_low": 0.03, "y_high": 0.5, "cb": 0, "cr": 0,
+                                       "sat_avg": 0.25})
+        tf = luts.build_transform(None, 1.0, cdl=cdl)
+        self.assertLess(tf((0.85, 0.85, 0.85))[0], 0.999)
+        self.assertLessEqual(cdl["offset"][0], 0.0)
+
+    def test_split_tone_keeps_black_and_white(self):
+        for look in ("orange-teal", "moody", "cool", "warm"):
+            tf = luts.build_transform(look, 1.0)
+            k = tf((0.0, 0.0, 0.0))
+            self.assertLess(max(k) - min(k), 0.006, look)   # black may lift (moody), but stays neutral
+            w = tf((1.0, 1.0, 1.0))
+            self.assertLess(max(w) - min(w), 0.13, look)
+
+    def test_natural_is_gentle_on_skin(self):
+        import colorsys
+        skin = (0.8, 0.55, 0.42)
+        s0 = colorsys.rgb_to_hls(*skin)[2]
+        s1 = colorsys.rgb_to_hls(*luts.build_transform("natural", 1.0)(skin))[2]
+        self.assertLess(s1, s0 * 1.12)
+        self.assertEqual(tuple(round(v, 3) for v in luts.build_transform("natural", 1.0)((1, 1, 1))), (1, 1, 1))
+
+    def test_transform_rev_tracks_math(self):
+        a = luts.transform_rev(luts.build_transform("film", 1.0))
+        self.assertEqual(a, luts.transform_rev(luts.build_transform("film", 1.0)))
+        self.assertNotEqual(a, luts.transform_rev(luts.build_transform("film", 0.9)))
 
     def test_aliases(self):
         self.assertEqual(luts.normalize_look("Orange & Teal"), "orange-teal")
         self.assertIsNone(luts.normalize_look("Leave it"))
+
+
+class TestLutCache(unittest.TestCase):
+    def test_split_composed_matches_every_look(self):
+        from flow import grade
+        for look in luts.LOOKS:
+            m = grade.COMPOSED_RE.match(f"My_Clip_LUT_abcd__{look}-r1a2b3_80_w3.cube")
+            self.assertIsNotNone(m, look)
+            self.assertEqual((m.group(1), m.group(2)), ("My_Clip_LUT", "abcd"))
+        self.assertIsNotNone(grade.COMPOSED_RE.match("Clip_abcd__nightlife5_80.cube"))  # older name
+        self.assertIsNone(grade.COMPOSED_RE.match("Some_Camera_LUT.cube"))
+        self.assertIsNone(grade.split_composed("Flow_film-r1a2b3_80.cube"))
+
+    def test_cache_name_changes_with_math(self):
+        from flow import grade
+        d = Path(tempfile.mkdtemp())
+        a = grade.lut_for("film", 0.8, None, d)
+        b = grade.lut_for("film", 0.9, None, d)
+        self.assertNotEqual(a.name, b.name)
+        self.assertTrue(a.name.startswith("Flow_film-r"))
 
 
 class TestNightlife(unittest.TestCase):
@@ -678,6 +758,45 @@ class TestStylesAndNotes(unittest.TestCase):
         st = styles.get_style(p.stem)
         self.assertEqual(st["captions"]["size"], 0.1)
         self.assertEqual(st["captions"]["case"], "upper")  # inherited
+
+    def test_validation_catches_bad_values(self):
+        st = styles.get_style("clean")
+        bad = styles.deep_merge(st, {"captions": {"color": "red", "position": [2, -1], "animation": "bounce"},
+                                     "grade": {"look": "filmic"}})
+        errs = " | ".join(styles.validate_style(bad))
+        for frag in ("captions.color", "captions.position", "captions.animation", "grade.look"):
+            self.assertIn(frag, errs)
+        self.assertEqual(styles.validate_style(st), [])
+
+    def test_bad_custom_style_is_not_written(self):
+        from flow import paths
+        with self.assertRaises(Exception):
+            styles.save_user_style({"name": "Broken Colour", "captions": {"color": "red"}}, base="clean")
+        self.assertFalse((paths.USER_STYLES_DIR / "broken-colour.json").exists())
+
+    def test_extends_accepts_display_name(self):
+        from flow import paths
+        from flow.util import write_json
+        write_json(paths.USER_STYLES_DIR / "by-name.json", {"name": "By Name", "extends": "Talking Head+",
+                                                             "captions": {"size": 0.07}})
+        write_json(paths.USER_STYLES_DIR / "clean.json", {"name": "Clean", "extends": "clean",
+                                                          "captions": {"size": 0.05}})
+        try:
+            self.assertEqual(styles.get_style("by-name")["captions"]["case"], "upper")
+            self.assertEqual(styles.get_style("clean")["captions"]["size"], 0.05)  # shadows the built-in
+            self.assertEqual(styles.get_style("clean")["captions"]["max_words"], 1)
+        finally:
+            (paths.USER_STYLES_DIR / "by-name.json").unlink()
+            (paths.USER_STYLES_DIR / "clean.json").unlink()
+
+    def test_presets_respect_safe_zones(self):
+        for row in styles.list_styles():
+            if row["source"] != "builtin":
+                continue
+            st = styles.get_style(row["id"])
+            y = st["captions"]["position"][1]
+            self.assertTrue(0.26 <= y <= 0.5, (row["id"], y))
+            self.assertTrue(0.76 <= st["hook"]["position"][1] <= 0.84, row["id"])
 
     def test_classify_notes(self):
         self.assertEqual(notes.classify("title: Berlin 2026"), "title")

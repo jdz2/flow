@@ -29,6 +29,21 @@ style usually only lists its differences and sets `"extends": "<built-in id>"`.
 ```
 Positions are Fusion space: `[x, y]`, 0..1, with y measured from the bottom.
 
+Safe zones on 9:16: Reels/TikTok/Shorts UI covers roughly the bottom 25%, the top 12% and the right 13%.
+Keep captions at y 0.28–0.45 and the hook around 0.80 (above the face, below the top bar). A caption
+line wider than ~78% of the frame is shrunk to fit automatically.
+
+Allowed values (checked when a style is loaded or saved, so mistakes show up before the build):
+- `captions.case` / `hook.case`: none | upper | lower (lower keeps "I" and acronyms like AI, NASA)
+- `captions.animation` / `hook.animation`: pop | pop_strong | fade | slide | tracking | none
+  (`pop_strong` only does the big pop on emphasised words; fades don't blink between back-to-back captions)
+- `zoom.mode`: auto | none. `on_cuts` alternates 1.0 / that value on every jump cut, `on_emphasis` punches
+  on emphasised words, `every` adds a change mid-span every N seconds (0 = off), `max` caps everything.
+- `transitions.type`: none | smooth_cut | dissolve (`frames`, default 4). Smooth Cut is skipped where the
+  zoom changes across the cut, since it would morph between two scales.
+- colours are hex (`#RRGGBB`), positions are two numbers in 0..1, `grade.look` must be a known look.
+- `extends` takes an id or a display name ("Talking Head+").
+
 Optional sections (defaults apply when missing):
 
 ```jsonc

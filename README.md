@@ -47,7 +47,7 @@ Check your setup any time with:
 - **Hook and titles:** an AI-written hook, a cold open, and title, chapter, lower-third, location,
   end-card and quote titles.
 - **Look:** auto balance (an editable CDL on node 1) plus a look LUT. Looks: Natural, Orange & Teal,
-  Film, Moody, Warm, Cool, B&W, Vintage, or your own `.cube`.
+  Film, Moody, Warm, Cool, B&W, Vintage, Nightlife (club and neon light), or your own `.cube`.
 - **Cinematic:** speed ramps through pauses, slow-mo, letterbox, grain, halation, light leaks.
 - **Effects:** shake, flash, glow, RGB split, blur-in.
 - **Masks:** spotlight, background blur, vignette, highlight box, circle reveal.

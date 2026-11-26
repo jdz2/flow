@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from flow import luts
-from flow.styles import deep_merge, get_style
+from flow.styles import check_style, deep_merge, get_style
 from flow.util import FlowError, fmt_time, read_json, write_json
 
 OVERLAY_FX = {"flash", "letterbox", "vignette", "spotlight", "highlight_box", "circle_reveal", "grain",
@@ -352,15 +352,27 @@ def apply_split_edits(segments: List[dict], words: list, plan: dict, style: dict
 
 
 # ---------------------------------------------------------------- captions
+_KEEP_CAPS = re.compile(r"^([A-Z](?:\.[A-Z])+\.?|I|I'm|I've|I'll|I'd|I’m|I’ve|I’ll|I’d|[A-Z0-9]{2,}[a-z]?)$")
+
+
+def _lower_word(w: str) -> str:
+    """Lower-case one word, but keep the pronoun I and acronyms (AI, NASA, USB) as written."""
+    core = w.strip("\"“”'‘’()[]!?.,;:…—–-")
+    return w if core and _KEEP_CAPS.match(core) else w.lower()
+
+
 def transform_text(text: str, case: str, strip: bool) -> str:
     t = text.strip()
     if strip:
-        t = re.sub(r"[.,;:…]+([\"')\]]*)$", r"\1", t)
+        if not re.search(r"\w\.\w", t):          # leave "U.S." / "e.g." alone
+            t = re.sub(r"[.,;:…—–]+([\"')\]]*)$", r"\1", t)
+        else:
+            t = re.sub(r"[,;:…—–]+([\"')\]]*)$", r"\1", t)
         t = t.strip("\"“”")
     if case == "upper":
         t = t.upper()
     elif case == "lower":
-        t = t.lower()
+        t = " ".join(_lower_word(w) for w in t.split(" "))
     return t
 
 
@@ -370,7 +382,9 @@ def chunk_captions(rec_words: List[dict], ccfg: dict, emphasis: set, fps: float,
     max_chars = int(ccfg.get("max_chars", 20))
     case = ccfg.get("case", "none")
     strip = bool(ccfg.get("strip_punctuation", True))
-    isolate = bool(ccfg.get("highlight_emphasis")) and bool(ccfg.get("accent")) and max_words >= 3
+    highlight = bool(ccfg.get("highlight_emphasis")) and bool(ccfg.get("accent"))
+    # an emphasised word gets its own caption, so the accent colour lands on that word only
+    isolate = highlight and max_words >= 2
     gap_break = int(round(0.35 * fps))
     chunks: List[dict] = []
     cur: List[dict] = []
@@ -380,7 +394,7 @@ def chunk_captions(rec_words: List[dict], ccfg: dict, emphasis: set, fps: float,
             chunks.append({"words": [w["i"] for w in cur],
                            "text": " ".join(transform_text(w["text"], case, strip) for w in cur).strip(),
                            "f0": cur[0]["f0"], "last_f1": cur[-1]["f1"],
-                           "accent": any(w["i"] in emphasis for w in cur)})
+                           "accent": highlight and any(w["i"] in emphasis for w in cur)})
             cur.clear()
 
     carry: List[dict] = []
@@ -419,6 +433,7 @@ def chunk_captions(rec_words: List[dict], ccfg: dict, emphasis: set, fps: float,
         if end <= c["f0"]:
             end = min(total_frames, c["f0"] + 2)
         c["f1"] = end
+        c["handoff"] = end == nxt and k + 1 < len(chunks)   # next caption starts right here: no fade-out
         del c["last_f1"]
     return [c for c in chunks if c["f1"] > c["f0"]]
 
@@ -475,6 +490,7 @@ def compile_job(job: Path) -> dict:
         raise FlowError("edit_plan.json needs a style (e.g. \"talking-head\").")
     style = get_style(plan["style"])
     style = deep_merge(style, plan.get("overrides") or {})
+    check_style(style, f"{plan['style']} + plan overrides")
     font = plan.get("font")
     if font:
         fam, fstyle = (font.get("family"), font.get("style")) if isinstance(font, dict) else (font, None)
@@ -509,11 +525,12 @@ def compile_job(job: Path) -> dict:
     main_spans = build_spans(main_ids, words, pacing, duration)
 
     zoom = assign_zoom(co_spans + main_spans, words, style, plan, emphasis, warn)
-    if co_spans and style.get("zoom", {}).get("mode") != "none":
+    if co_spans and style.get("zoom", {}).get("mode", "none") != "none":
         lvl = float(style["zoom"].get("on_emphasis") or style["zoom"].get("on_cuts") or 1.1)
+        cap = float(style["zoom"].get("max", 1.4))
         for sp in co_spans:
             for i in sp["ids"]:
-                zoom[i] = max(zoom[i], round(min(lvl, 1.4), 4))
+                zoom[i] = max(zoom[i], round(min(lvl, cap), 4))
 
     # ramps (non-speech only)
     ramps_cfg = style.get("ramps", {})
@@ -852,6 +869,8 @@ def compile_job(job: Path) -> dict:
                 continue
             if s.get("split_in"):
                 continue  # a J/L cut already smooths this cut
+            if ttype == "smooth_cut" and abs(float(s.get("zoom", 1.0)) - float(segments[k - 1].get("zoom", 1.0))) > 1e-3:
+                continue  # Smooth Cut morphs between the two frames; across a punch-in it warps the face
             if s["rec_len"] < frames + 2 or segments[k - 1]["rec_len"] < frames + 2:
                 continue
             s["transition_in"] = {"type": {"smooth_cut": "Smooth Cut", "dissolve": "Cross Dissolve"}.get(ttype, ttype),

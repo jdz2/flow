@@ -14,10 +14,10 @@ TITLE_DEFAULTS = {
               "animation": "tracking", "tracking": 1.0, "duration": 3.0, "sub_size": 0.034, "shadow": True},
     "chapter": {"font_style": "Bold", "size": 0.06, "case": "upper", "color": "#FFFFFF", "position": [0.5, 0.5],
                 "animation": "fade", "tracking": 1.0, "duration": 2.0, "sub_size": 0.03, "shadow": True},
-    "lower_third": {"font_style": "Bold", "size": 0.055, "case": "none", "color": "#FFFFFF", "position": [0.07, 0.2],
+    "lower_third": {"font_style": "Bold", "size": 0.055, "case": "none", "color": "#FFFFFF", "position": [0.07, 0.3],
                     "align": "left", "animation": "slide", "duration": 3.5, "sub_size": 0.042,
                     "box": {"color": "#000000", "opacity": 0.55}},
-    "location": {"font_style": "SemiBold", "size": 0.046, "case": "upper", "color": "#FFFFFF", "position": [0.5, 0.86],
+    "location": {"font_style": "SemiBold", "size": 0.046, "case": "upper", "color": "#FFFFFF", "position": [0.5, 0.82],
                  "animation": "tracking", "tracking": 1.0, "duration": 3.0, "sub_size": 0.032, "shadow": True},
     "end_card": {"font_style": "Bold", "size": 0.075, "case": "none", "color": "#FFFFFF", "position": [0.5, 0.52],
                  "animation": "fade", "duration": 3.0, "sub_size": 0.045, "sub_style": "SemiBold", "shadow": True},
@@ -82,17 +82,44 @@ def _style_text(tool: Any, text: str, cfg: dict, accent: bool = False, size_scal
         set_inputs(tool, {"Enabled4": 0.0})
 
 
-def _animate(tool: Any, anim: str, size: float, start: float, dur: int, cfg: dict) -> None:
+# Widest a centred line may get (share of frame width): clears the right-hand UI rail on Reels/TikTok.
+MAX_LINE_WIDTH = 0.78
+
+
+def fit_scale(text: str, cfg: dict) -> float:
+    """Shrink factor so the longest line fits MAX_LINE_WIDTH. Text+ Size is roughly the em as a share
+    of frame width; average glyph width is ~0.66 em for caps in heavy weights, ~0.56 em otherwise."""
+    lines = [ln for ln in (text or "").split("\n") if ln.strip()]
+    if not lines:
+        return 1.0
+    longest = max(lines, key=len)
+    heavy = (cfg.get("font_style") or "").lower() in ("black", "heavy", "extrabold", "extra bold")
+    per = 0.66 if (longest.isupper() or heavy) else 0.56
+    outline = float((cfg.get("outline") or {}).get("width", 0.0)) if isinstance(cfg.get("outline"), dict) else 0.0
+    est = len(longest) * float(cfg.get("size", 0.065)) * per * (1.0 + outline)
+    return 1.0 if est <= MAX_LINE_WIDTH else max(0.6, MAX_LINE_WIDTH / est)
+
+
+def _animate(tool: Any, anim: str, size: float, start: float, dur: int, cfg: dict,
+             fade_out: bool = True, fps: float = 30.0, accent: bool = False) -> None:
+    """Keyframe the entrance. Timings are authored at 30 fps and scaled to the timeline rate.
+    fade_out=False for a caption that hands straight over to the next one (no blink between them)."""
+    k = max(0.5, float(fps or 30.0) / 30.0)
+
+    def f(n: float) -> float:
+        return start + max(1, int(round(n * k)))
+
     end = start + max(1, dur - 1)
     if anim == "pop":
-        animate(tool, "Size", [(start, size * 0.86), (start + 3, size * 1.03), (start + 5, size)])
+        animate(tool, "Size", [(start, size * 0.86), (f(3), size * 1.03), (f(5), size)])
     elif anim == "pop_strong":
-        animate(tool, "Size", [(start, size * 0.6), (start + 3, size * 1.1), (start + 5, size * 0.98),
-                               (start + 7, size)])
+        # every caption pops; only an emphasised word gets the big one
+        lo, hi = (0.65, 1.08) if accent else (0.8, 1.05)
+        animate(tool, "Size", [(start, size * lo), (f(3), size * hi), (f(5), size * 0.99), (f(7), size)])
     elif anim in ("fade", "slide", "tracking"):
-        fin = min(5, max(1, dur // 4))
+        fin = min(int(round(4 * k)), max(1, dur // 4))
         keys = [(start, 0.0), (start + fin, 1.0)]
-        if dur > 12:
+        if fade_out and dur > 12 * k:
             keys += [(end - fin, 1.0), (end, 0.0)]
         animate(tool, "Blend", keys)
         if anim == "slide":
@@ -101,7 +128,7 @@ def _animate(tool: Any, anim: str, size: float, start: float, dur: int, cfg: dic
             dy = 0.0 if dx else -0.02
             try:
                 from flow.fusion_util import animate_point
-                animate_point(tool, "Center", [(start, pos[0] - dx, pos[1] + dy), (start + 6, pos[0], pos[1])])
+                animate_point(tool, "Center", [(start, pos[0] - dx, pos[1] + dy), (f(6), pos[0], pos[1])])
             except Exception:
                 pass
         if anim == "tracking":
@@ -109,15 +136,18 @@ def _animate(tool: Any, anim: str, size: float, start: float, dur: int, cfg: dic
             animate(tool, "CharacterSpacing", [(start, base + 0.22), (start + max(8, int(dur * 0.7)), base)])
 
 
-def style_caption(item: Any, text: str, ccfg: dict, accent: bool, dur: int) -> bool:
+def style_caption(item: Any, text: str, ccfg: dict, accent: bool, dur: int,
+                  fade_out: bool = True, fps: float = 30.0) -> bool:
     comp, tool = text_tool(item)
     if tool is None:
         return False
     fit_comp_range(comp, dur)
+    scale = fit_scale(text, ccfg)
     comp.Lock()
     try:
-        _style_text(tool, text, ccfg, accent)
-        _animate(tool, ccfg.get("animation", "none"), float(ccfg.get("size", 0.065)), comp_start(comp), dur, ccfg)
+        _style_text(tool, text, ccfg, accent, size_scale=scale)
+        _animate(tool, ccfg.get("animation", "none"), float(ccfg.get("size", 0.065)) * scale, comp_start(comp),
+                 dur, ccfg, fade_out=fade_out, fps=fps, accent=accent)
     finally:
         comp.Unlock()
     return True
