@@ -18,6 +18,13 @@ def _out(args, data, text: str) -> None:
         print(text.rstrip())
 
 
+# Which command produces each job file, for friendly "run X first" errors.
+MISSING_STEP = {
+    "clip.json": "find --path <clip>", "words.json": "transcribe", "analysis.json": "analyze",
+    "edit_plan.draft.json": "analyze", "build.json": "compile", "broll.json": "broll",
+}
+
+
 # ---------------------------------------------------------------- commands
 def cmd_doctor(args):
     from flow import doctor
@@ -295,6 +302,40 @@ def cmd_edit(args):
     return 0
 
 
+def cmd_status(args):
+    from flow import status
+    job = paths.resolve_job(args.job)
+    st = status.job_status(job)
+    _out(args, st, status.format_status(st))
+    return 0
+
+
+def cmd_jobs(args):
+    from flow import status
+    rows = status.list_jobs(limit=args.limit)
+    _out(args, rows, status.format_jobs(rows))
+    return 0
+
+
+def cmd_render(args):
+    from flow import render
+    job = None
+    if args.job or (paths.LATEST_LINK.exists() and not args.timeline):
+        job = paths.resolve_job(args.job)
+    res = render.render(job, timeline=args.timeline, out_dir=Path(args.out) if args.out else None,
+                        codec=args.codec, wait=not args.no_wait, srt=not args.no_srt)
+    _out(args, res, render.format_render(res))
+    return 0
+
+
+def cmd_srt(args):
+    from flow import render
+    job = paths.resolve_job(args.job)
+    res = render.write_srt(job, Path(args.out).expanduser() if args.out else None)
+    _out(args, res, f"{res['cues']} captions → {res['file']}")
+    return 0
+
+
 # ---------------------------------------------------------------- parser
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="flow", description="Flow: AI reel editor for DaVinci Resolve")
@@ -408,6 +449,20 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--live", action="store_true", help="work in front of the user: pages, playhead, playback")
     sp.add_argument("--pace", type=float, default=1.0)
     sp.add_argument("--play", choices=["scrub", "keys", "none"], default="scrub")
+    sp = add("status", cmd_status, "where the job stands and what to run next (offline)")
+    sp.add_argument("--job")
+    sp = add("jobs", cmd_jobs, "list recent jobs (* = latest)")
+    sp.add_argument("--limit", type=int, default=10)
+    sp = add("render", cmd_render, "render the job's timeline (or --timeline) to a file via the Deliver page")
+    sp.add_argument("--job")
+    sp.add_argument("--timeline", help="timeline name (default: the job's last build, then the current one)")
+    sp.add_argument("--out", help="output folder (default ~/Movies/Flow)")
+    sp.add_argument("--codec", choices=["h264", "h265", "prores"], default="h264")
+    sp.add_argument("--no-wait", action="store_true", help="queue and start the render, don't wait")
+    sp.add_argument("--no-srt", action="store_true", help="don't write the .srt captions next to it")
+    sp = add("srt", cmd_srt, "write the job's captions as an .srt file (offline)")
+    sp.add_argument("--job")
+    sp.add_argument("--out", help="output .srt path (default: in the job folder)")
     return p
 
 
@@ -418,6 +473,16 @@ def main(argv=None) -> int:
         return int(args.fn(args) or 0)
     except FlowError as exc:
         print(f"flow: {exc}", file=sys.stderr)
+        return 2
+    except FileNotFoundError as exc:
+        name = Path(exc.filename or "").name
+        step = MISSING_STEP.get(name)
+        hint = f" Run `flow {step}` first." if step else ""
+        print(f"flow: missing {exc.filename}.{hint}", file=sys.stderr)
+        return 2
+    except json.JSONDecodeError as exc:
+        print(f"flow: a JSON file is malformed (line {exc.lineno}, column {exc.colno}): {exc.msg}. "
+              "Fix it and run the command again.", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         return 130

@@ -24,6 +24,9 @@ def run_checks(connect_resolve: bool = True) -> dict:
     _check(rows, "whisper model", mp.exists(),
            f"{mp.name} ({mp.stat().st_size // 1_000_000} MB)" if mp.exists() else str(mp),
            f"./install.sh (downloads {paths.DEFAULT_MODEL})")
+    from flow import drx
+    _check(rows, "zstd (mask grades)", drx.zstd_available(), which("zstd") or ("python zstandard" if drx.zstd_available() else ""),
+           "brew install zstd", required=False)
     app = rb.find_resolve_app()
     _check(rows, "DaVinci Resolve installed", app is not None, str(app or ""), "Install DaVinci Resolve Studio")
     lut_ok = paths.RESOLVE_LUT_DIR.exists() and os.access(paths.RESOLVE_LUT_DIR, os.W_OK)

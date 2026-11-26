@@ -63,9 +63,15 @@ def _load_module():
 
 def resolve_running() -> bool:
     import subprocess
-    out = subprocess.run(["pgrep", "-f", "DaVinci Resolve.app/Contents/MacOS/Resolve"],
-                         capture_output=True, text=True)
-    return bool(out.stdout.strip())
+    # The app bundle may be "DaVinci Resolve.app" or "DaVinci Resolve Studio.app"; the binary is "Resolve".
+    for args in (["pgrep", "-x", "Resolve"], ["pgrep", "-f", r"DaVinci Resolve.*\.app/Contents/MacOS/Resolve"]):
+        try:
+            out = subprocess.run(args, capture_output=True, text=True)
+        except OSError:
+            return True  # no pgrep: let the connection attempt decide
+        if out.stdout.strip():
+            return True
+    return False
 
 
 def connect(retries: int = 2) -> Any:

@@ -15,6 +15,7 @@ printf '%s\n' "$ROOT/engine" > "$FLOW_HOME/engine_path"
 chmod +x "$ROOT/bin/flow"
 
 command -v ffmpeg >/dev/null 2>&1 || { say "Installing ffmpeg"; brew install ffmpeg; }
+command -v zstd >/dev/null 2>&1 || { say "Installing zstd (reference-matched mask grades)"; brew install zstd || true; }
 if ! command -v whisper-cli >/dev/null 2>&1; then
   say "Installing whisper.cpp"
   brew install whisper-cpp
@@ -40,6 +41,13 @@ if [ -e "$HOME/.claude/skills/flow" ] && [ ! -L "$HOME/.claude/skills/flow" ]; t
 else
   ln -sfn "$ROOT/skills/flow" "$HOME/.claude/skills/flow"
 fi
+
+say "Installing the Flow slash commands (/flow-reel, /flow-tweak, /flow-render, …)"
+mkdir -p "$HOME/.claude/commands"
+for cmd in "$ROOT"/commands/*.md; do
+  [ -e "$cmd" ] || continue
+  ln -sfn "$cmd" "$HOME/.claude/commands/flow-$(basename "$cmd")"
+done
 
 say "Checking setup"
 "$ROOT/bin/flow" doctor || true
