@@ -2,13 +2,18 @@
 
     flow magnific status                 folder, watcher, where new creations go, recent imports
     flow magnific folder [DIR] [--all]   show or set the folder (default ~/Movies/Flow/Magnific)
-    flow magnific pull --url U | --file F [--name --creation --prompt --model]
+    flow magnific pull --url U | --file F [--name --creation --prompt --model --slot S3 --version-of C]
                                          save a finished creation into the folder (Claude runs this
-                                         after a Magnific generation)
+                                         after a Magnific generation); --slot / --version-of say where
+                                         in the edit it belongs
     flow magnific sync [--all]           import what is new in the folder into Resolve, now
     flow magnific start | stop           the watcher in the background: it looks every few seconds
     flow magnific watch                  the watcher in the foreground (what `start` runs)
-    flow magnific place bin|playhead     where new creations go (bin, the media pool, is the default)
+    flow magnific place bin|slots|playhead
+                                         where new creations go (bin, the media pool, is the default)
+    flow magnific slots [--no-mark]      the open timeline's slots: where new visuals belong (S1, S2 …)
+    flow magnific put FILE --slot S3 [--in SEC]
+                                         build a creation into a slot now (a new clip, or a take on a filled one)
     flow magnific undo                   take the last placed creation off the timeline again
     flow magnific selftest --switch      check all of this in the running Resolve (Flow Sandbox project)
 
@@ -18,9 +23,12 @@ Magnific key; generations run in the Claude session (Flow skill, "4. Magnific").
 
 New files are imported into the media pool bin "Flow › Magnific", purple like AI shots, with prompt,
 model and creation id in the clip's metadata (so `flow broll --bin Magnific` can match them by what
-they show). With `place playhead` each new creation also goes onto the open timeline at the
-playhead, on its own track ("Flow Magnific"; audio on "Flow Magnific Audio") at the first free spot
-of that track. Nothing already on the timeline is moved, trimmed or covered, and `undo` removes it.
+they show). With `place slots` a creation made for a slot of the open timeline (pulled with --slot,
+named "S3 …", or pulled with --version-of a creation in the edit) also goes into that slot: a new clip
+for an open one, a take on the clip of a filled one (see magnific_slots.py); the rest waits in the
+media pool. `place playhead` does the same and puts the rest onto the open timeline at the playhead, on
+its own track ("Flow Magnific"; audio on "Flow Magnific Audio") at the first free spot of that track.
+Nothing already on the timeline is moved, trimmed or covered, and `undo` takes the last one back.
 
 A file is imported once it has stopped changing (same size and time on two looks a few seconds
 apart) and reads as media; partial downloads (.part, .crdownload, Safari's .download) and hidden
@@ -56,7 +64,7 @@ PARTIAL_EXT = {".part", ".crdownload", ".download", ".tmp", ".partial", ".opdown
 SETTLE = 2.0                       # seconds a new file must stay unchanged before it is imported
 GIVE_UP = 120.0                    # a file that still doesn't read as media after this is skipped
 DEFAULTS = {"folder": None, "place": "bin", "interval": 3.0, "still_seconds": 5.0}
-PLACES = ("bin", "playhead")
+PLACES = ("bin", "slots", "playhead")
 CONTENT_TYPES = {
     "video/quicktime": ".mov", "video/mp4": ".mp4", "video/x-m4v": ".m4v", "video/webm": ".webm",
     "video/x-matroska": ".mkv", "image/png": ".png", "image/jpeg": ".jpg", "image/tiff": ".tif",
@@ -333,10 +341,15 @@ def _sniff(p: Path) -> str:
 
 def pull(url: Optional[str] = None, file: Optional[str] = None, name: Optional[str] = None,
          creation: Optional[str] = None, prompt: Optional[str] = None, model: Optional[str] = None,
-         kind: Optional[str] = None, ext: Optional[str] = None, force: bool = False) -> dict:
-    """Save a finished creation into the folder, complete, with what made it (for the clip metadata)."""
+         kind: Optional[str] = None, ext: Optional[str] = None, force: bool = False,
+         slot: Optional[str] = None, version_of: Optional[str] = None) -> dict:
+    """Save a finished creation into the folder, complete, with what made it (for the clip metadata).
+    slot: the slot it was made for (S3); version_of: the creation it is a new version of."""
     if not url and not file:
         raise FlowError("Give --url (the finished creation's https link) or --file.")
+    if slot:
+        from flow.magnific_slots import norm_id
+        slot = norm_id(slot)
     root = folder()
     root.mkdir(parents=True, exist_ok=True)
     if creation and not force:
@@ -347,6 +360,10 @@ def pull(url: Optional[str] = None, file: Optional[str] = None, name: Optional[s
     if ext and not ext.startswith("."):
         ext = "." + ext
     base = name or (Path(file).stem if file else "") or (f"creation-{creation}" if creation else "")
+    if slot:
+        from flow.magnific_slots import slot_in_name
+        if slot_in_name(base) != slot:
+            base = f"{slot} {base}"           # the file says which slot it is for, in Finder too
     stem = f"{time.strftime('%Y%m%d-%H%M%S')}_{_slug(base)}"
     if file:
         src = Path(file).expanduser()
@@ -388,7 +405,8 @@ def pull(url: Optional[str] = None, file: Optional[str] = None, name: Optional[s
             pulled = _load("pulled.json", {})
             pulled[_key(final)] = {"sig": sig(tmp), "creation": str(creation) if creation else None,
                                    "prompt": prompt, "model": model, "title": name, "kind": k,
-                                   "pulled": _now(), "source": "file" if file else "url"}
+                                   "pulled": _now(), "source": "file" if file else "url",
+                                   "slot": slot, "version_of": str(version_of) if version_of else None}
             _save("pulled.json", pulled)
             os.replace(tmp, final)
     finally:
@@ -592,6 +610,9 @@ def _import(ready: List[Path], root: Path, st: dict, pulled: dict, where: str, c
             batch.append((rel, p, k, meta))
     if not batch:
         return
+    # which of them were made for a slot (sure signals only), and do they fit: before anything changes
+    plans = _plan_slots(project, tl, batch, where, res)
+    extra = [pl["use"] for pl in plans.values() if pl.get("use") is not None and pl["use"] != pl["path"]]
     prev = mp.GetCurrentFolder()  # first: Resolve opens a bin it just made (and the bin it imports into)
     target = _sub_bin(mp, _flow_bin(mp), BIN)
     items: Dict[str, Tuple[Any, bool]] = {}
@@ -602,16 +623,17 @@ def _import(ready: List[Path], root: Path, st: dict, pulled: dict, where: str, c
             items[rel] = (mpi, True)
         else:
             todo.append((rel, p))
+    todo += [(None, x) for x in extra if find_media_pool_item(mp, str(x)) is None]
+    by_path: Dict[str, Any] = {}
     if todo:
         got = _import_into(mp, target, [str(p) for _, p in todo])
-        by_path = {}
         for it in got:
             fp = _file_path(it)
             if fp:
                 by_path[_key(Path(fp))] = it
         for rel, p in todo:
             it = by_path.get(_key(p))
-            if it is not None:
+            if it is not None and rel is not None:
                 items[rel] = (it, False)
     restore_view(mp, prev, res)
     pname = project.GetName()
@@ -626,23 +648,125 @@ def _import(ready: List[Path], root: Path, st: dict, pulled: dict, where: str, c
             _tag(mpi, meta)
         entry = {"sig": sig(p), "status": "imported", "at": _now(), "project": pname, "kind": k,
                  "media_pool_id": mpi.GetUniqueId()}
+        if meta.get("creation"):
+            entry["creation"] = str(meta["creation"])
         res["imported"].append({"file": rel, "kind": k, "already": already, "prompt": meta.get("prompt")})
-        if where == "playhead":
+        pl = plans.get(rel)
+        if pl:
+            entry["slot"] = pl["slot"]
+            if pl.get("note"):
+                entry["slot_note"] = pl["note"]
+        if pl and pl.get("use") is not None:
+            use_mpi = mpi
+            if pl["use"] != p:
+                use_mpi = by_path.get(_key(pl["use"])) or find_media_pool_item(mp, str(pl["use"]))
+                if use_mpi is not None:
+                    _tag(use_mpi, {**meta, "title": f"{meta.get('title') or p.stem} (slowed to fit {pl['slot']})"})
+            try:
+                if use_mpi is None:
+                    raise FlowError(f"Resolve didn't import the slowed copy of {p.name}")
+                done = _build_in(resolve, project, mp, tl, pl["slot"], use_mpi, pl["use"], k, meta, source=p)
+            except FlowError as exc:
+                entry["slot_note"] = str(exc)
+                res["notes"].append(f"{p.name}: {exc} It stays in the media pool.")
+            else:
+                entry["placed"] = {x: done[x] for x in ("timeline", "item", "seconds", "slot", "op")}
+                res["placed"].append({**done, "file": rel})
+        elif where == "playhead" and not pl:         # one made for a slot that can't take it waits
             if tl is None:
                 res["notes"].append("no timeline is open, so new creations stay in the media pool")
             else:
                 try:
-                    pl = place(mp, tl, mpi, p, k, float(cfg.get("still_seconds") or DEFAULTS["still_seconds"]))
+                    pl2 = place(mp, tl, mpi, p, k, float(cfg.get("still_seconds") or DEFAULTS["still_seconds"]))
                 except FlowError as exc:
                     res["notes"].append(str(exc))
                 else:
-                    entry["placed"] = {x: pl[x] for x in ("timeline", "item", "seconds")}
-                    res["placed"].append({**pl, "file": rel})
-                    placed = _load("placed.json", [])
-                    placed.append({**pl, "file": str(p), "at": _now()})
-                    _save("placed.json", placed[-200:])
+                    entry["placed"] = {x: pl2[x] for x in ("timeline", "item", "seconds")}
+                    res["placed"].append({**pl2, "op": "playhead", "file": rel})
+                    _remember({**pl2, "op": "playhead", "file": str(p)})
         handled[rel] = entry
         pending.pop(rel, None)
+
+
+def _remember(placement: dict) -> None:
+    placed = _load("placed.json", [])
+    placed.append({**placement, "at": _now()})
+    _save("placed.json", placed[-200:])
+
+
+def _already_placed(p: Path) -> bool:
+    keys = {str(p), _key(p)}
+    return any(not e.get("undone") and (e.get("file") in keys or e.get("source") in keys)
+               for e in _load("placed.json", []))
+
+
+def _plan_slots(project: Any, tl: Any, batch: List[Tuple[str, Path, str, dict]], where: str,
+                res: dict) -> Dict[str, dict]:
+    """rel → {"slot", "path", "use" (the file to build in, maybe a slowed copy; None = don't), "note"}
+    for the new files that name a slot. Only reads the timeline (and marks nothing)."""
+    from flow import magnific_slots as ms
+    if tl is None:
+        return {}
+    cands = [(rel, p, k, meta) for rel, p, k, meta in batch if k in ("video", "image")
+             and (meta.get("slot") or meta.get("version_of") or ms.slot_in_name(meta.get("title"), p.name))]
+    if not cands:
+        return {}
+    pname = project.GetName()
+    ms.scan(project, tl, mark=False)              # where the slots are now (reads the timeline, marks nothing)
+    recs = ms.load(pname)["slots"]
+    tl_fps = _num(tl.GetSetting("timelineFrameRate")) or 24.0
+    plans: Dict[str, dict] = {}
+    for rel, p, k, meta in cands:
+        sid, why = ms.match(meta, p.name, recs)
+        if not sid:
+            continue
+        pl = {"slot": sid, "why": why, "path": p, "use": None}
+        plans[rel] = pl
+        rec = recs.get(sid)
+        if rec is None or rec.get("status") == "gone":
+            pl["note"] = f"made for {sid}, but this project has no {sid}"
+        elif rec.get("timeline") != tl.GetName():
+            pl["note"] = (f"made for {sid} on “{rec.get('timeline')}”: open that timeline and run "
+                          f"`flow magnific put \"{p.name}\" --slot {sid}`")
+        elif where == "bin":
+            pl["note"] = f"fits {sid} (new creations stay in the media pool: `flow magnific put \"{p.name}\" --slot {sid}`)"
+        elif (meta.get("creation") and rec.get("creation") == str(meta["creation"])) or _already_placed(p):
+            pl["note"] = f"already in {sid}"
+        else:
+            slot_len = int(rec["f1"]) - int(rec["f0"])
+            try:
+                f = ffprobe(p)
+            except FlowError:
+                f = {"duration": 0.0, "fps": tl_fps}
+            fit = ms.fit(k, slot_len, tl_fps, f["duration"], f.get("fps") or tl_fps)
+            if fit == "short":
+                pl["note"] = (f"made for {sid}, but it is {f['duration']:.2f}s and {sid} needs "
+                              f"{slot_len / tl_fps:.2f}s")
+            elif fit == "slow":
+                try:
+                    pl["use"] = ms.fit_copy(p, slot_len, tl_fps)
+                except FlowError as exc:
+                    pl["note"] = str(exc)
+            else:
+                pl["use"] = p
+        if pl.get("note"):
+            res["notes"].append(f"{p.name}: {pl['note']}")
+    return plans
+
+
+def _build_in(resolve: Any, project: Any, mp: Any, tl: Any, sid: str, mpi: Any, use: Path, kind: str,
+              meta: dict, source: Optional[Path] = None, src_in: Optional[float] = None) -> dict:
+    """Build one imported creation into slot sid of the open timeline, and remember it for undo."""
+    from flow import magnific_slots as ms
+    pname = project.GetName()
+    data = ms.load(pname)
+    rec = data["slots"].get(sid)
+    if rec is None or rec.get("status") == "gone":
+        raise FlowError(f"There is no {sid} on this project (`flow magnific slots` lists them).")
+    done = ms.build_in(resolve, project, mp, tl, rec, mpi, use, kind, meta, src_in)
+    ms.save(pname, data)
+    _remember({**done, "file": str(use), "source": str(source or use), "project": pname})
+    return done
 
 
 def sync(all_: bool = False, where: Optional[str] = None, wait: bool = True,
@@ -708,9 +832,15 @@ def _undo(connect: Optional[Callable[[], Any]]) -> dict:
         raise FlowError("Nothing to undo: no Magnific creation was placed on a timeline.")
     e = live[-1]
     resolve = (connect or rb.connect)()
-    _, _, tl = rb.current(resolve)
+    project, _, tl = rb.current(resolve)
     if tl is None or tl.GetName() != e["timeline"]:
         raise FlowError(f"The last creation went onto “{e['timeline']}”. Open that timeline, then undo again.")
+    if e.get("op") in ("fill", "take"):
+        from flow import magnific_slots as ms
+        say = ms.undo_entry(tl, e, e.get("project") or project.GetName())
+        e["undone"] = True
+        _save("placed.json", placed)
+        return {"undid": e, "say": say}
     lane = e.get("lane", "video")
     hits = []
     for k in range(1, int(tl.GetTrackCount(lane) or 0) + 1):
@@ -723,6 +853,92 @@ def _undo(connect: Optional[Callable[[], Any]]) -> dict:
     say = (f"took {name} off “{e['timeline']}” (it stays in the media pool bin Flow › {BIN})" if hits
            else f"{name} was already gone from “{e['timeline']}”")
     return {"undid": e, "say": say}
+
+
+# ---------------------------------------------------------------- slots (see magnific_slots.py)
+def slots(mark: bool = True, connect: Optional[Callable[[], Any]] = None) -> dict:
+    """The open timeline's slots, with ids that stick (marked in Resolve unless mark=False)."""
+    from flow import magnific_slots as ms
+    from flow import resolve_bridge as rb
+    with _Lock("sync.lock"):
+        project, _, tl = rb.current((connect or rb.connect)())
+        if tl is None:
+            raise FlowError("No timeline is open in Resolve.")
+        return ms.scan(project, tl, mark=mark)
+
+
+def put(target: str, slot: str, src_in: Optional[float] = None,
+        connect: Optional[Callable[[], Any]] = None) -> dict:
+    """Build one creation (a file, in the Magnific folder or anywhere) into a slot of the open timeline now:
+    a new clip in an open slot, a take on the clip of a filled one. The user's explicit ask, so it works in
+    every place mode."""
+    from flow import magnific_slots as ms
+    from flow import resolve_bridge as rb
+    from flow.build import _flow_bin, _import_into
+    from flow.find_clip import find_media_pool_item
+    sid = ms.norm_id(slot)
+    p = Path(target).expanduser()
+    if not p.is_file() and (folder() / target).is_file():
+        p = folder() / target
+    if not p.is_file():
+        raise FlowError(f"No such file: {target}")
+    p = p.resolve()
+    k = kind_of(p)
+    if k not in ("video", "image"):
+        raise FlowError(f"{p.name} isn't a picture; slots take video and stills.")
+    with _Lock("sync.lock"):
+        resolve = (connect or rb.connect)()
+        project, mp, tl = rb.current(resolve)
+        if tl is None:
+            raise FlowError("No timeline is open in Resolve.")
+        pulled = _load("pulled.json", {})
+        meta = dict(pulled.get(_key(p)) or {})
+        ms.scan(project, tl, mark=False)
+        rec = ms.load(project.GetName())["slots"].get(sid)
+        if rec is None or rec.get("status") == "gone":
+            raise FlowError(f"There is no {sid} on this project (`flow magnific slots` lists them).")
+        if rec.get("timeline") != tl.GetName():
+            raise FlowError(f"{sid} is on “{rec.get('timeline')}”; open that timeline first.")
+        tl_fps = _num(tl.GetSetting("timelineFrameRate")) or 24.0
+        slot_len = int(rec["f1"]) - int(rec["f0"])
+        f = ffprobe(p)
+        fit = ms.fit(k, slot_len, tl_fps, f["duration"], f.get("fps") or tl_fps)
+        if fit == "short":
+            raise FlowError(f"{p.name} is {f['duration']:.2f}s and {sid} needs {slot_len / tl_fps:.2f}s. Make a longer "
+                            "version, or make the slot shorter.")
+        use = ms.fit_copy(p, slot_len, tl_fps) if fit == "slow" else p
+        missing = [x for x in dict.fromkeys([p, use]) if find_media_pool_item(mp, str(x)) is None]
+        if missing:  # into the media pool before the timeline changes
+            prev = mp.GetCurrentFolder()
+            notes: Dict[str, Any] = {"notes": []}
+            got = _import_into(mp, _sub_bin(mp, _flow_bin(mp), BIN), [str(x) for x in missing])
+            restore_view(mp, prev, notes)
+            for it in got:
+                slowed = _key(Path(_file_path_of(it))) == _key(use) and use != p
+                _tag(it, {**meta, "title": (f"{meta.get('title') or p.stem} (slowed to fit {sid})" if slowed
+                                            else meta.get("title") or p.stem)})
+        mpi = find_media_pool_item(mp, str(use))
+        if mpi is None:
+            raise FlowError(f"Resolve didn't import {use.name}.")
+        done = _build_in(resolve, project, mp, tl, sid, mpi, use, k, meta, source=p, src_in=src_in)
+        if folder().resolve() in p.parents:  # from the Magnific folder: the watcher must not place it again
+            cfg = config()
+            st, _ = _state(cfg, pulled)
+            rel = _rel(folder(cfg).resolve(), p)
+            st["files"][rel] = {"sig": sig(p), "status": "imported", "at": _now(), "project": project.GetName(),
+                                "kind": k, "media_pool_id": mpi.GetUniqueId(), "slot": sid,
+                                "placed": {x: done[x] for x in ("timeline", "item", "seconds", "slot", "op")}}
+            st["pending"].pop(rel, None)
+            _save("state.json", st)
+    what = ("as a new take (the earlier version is one click away)" if done["op"] == "take"
+            else f"on {done['track_name']} at {done['seconds']:.2f}s")
+    return {**done, "say": f"{p.name} is in {sid} on “{done['timeline']}”, {what}"
+                           + (" · slowed to fit" if use != p else "") + " · `flow magnific undo` takes it back"}
+
+
+def _file_path_of(mpi: Any) -> str:
+    from flow.find_clip import _file_path
+    return _file_path(mpi) or ""
 
 
 # ---------------------------------------------------------------- the watcher
@@ -769,9 +985,16 @@ def _lines(res: dict) -> List[str]:
         out.append(f"MAGNIFIC · {i['file']} → media pool Flow › {BIN}"
                    + (" (was already there)" if i.get("already") else ""))
     for p in res.get("placed", []):
-        out.append(f"MAGNIFIC · {Path(p['file']).name} on “{p['timeline']}” at {p['seconds']:.2f}s, "
-                   f"track {p['track_name']}" + (" (the playhead spot was taken; first free spot after it)"
-                                                 if p.get("moved") else ""))
+        if p.get("op") == "take":
+            out.append(f"MAGNIFIC · {Path(p['file']).name} → {p['slot']} on “{p['timeline']}”: a new take on its clip "
+                       "(the earlier version is one click away)")
+        elif p.get("op") == "fill":
+            out.append(f"MAGNIFIC · {Path(p['file']).name} → {p['slot']} on “{p['timeline']}” at {p['seconds']:.2f}s, "
+                       f"track {p['track_name']}" + (" (placeholder switched off)" if p.get("placeholder_off") else ""))
+        else:
+            out.append(f"MAGNIFIC · {Path(p['file']).name} on “{p['timeline']}” at {p['seconds']:.2f}s, "
+                       f"track {p['track_name']}" + (" (the playhead spot was taken; first free spot after it)"
+                                                     if p.get("moved") else ""))
     for f in res.get("failed", []):
         out.append(f"MAGNIFIC · skipped {f['file']}: {f['why']}")
     return out
@@ -903,10 +1126,14 @@ def set_place(where: str, still_seconds: Optional[float] = None) -> dict:
     if where not in PLACES:
         raise FlowError(f"place must be {' or '.join(PLACES)}")
     cfg = save_config(place=where, still_seconds=still_seconds)
-    say = ("New creations go to the media pool bin Flow › Magnific only; timelines stay untouched."
-           if where == "bin" else
-           "New creations go to the media pool and onto the open timeline at the playhead, on the track "
-           f"“{TRACK['video']}” (stills {cfg['still_seconds']:g} s). `flow magnific undo` takes the last one off.")
+    slots_say = ("the ones made for a slot of the open timeline (S3 …, or a new version of a clip in the edit) "
+                 "go straight into it")
+    say = {"bin": "New creations go to the media pool bin Flow › Magnific only; timelines stay untouched.",
+           "slots": f"New creations go to the media pool; {slots_say}. The rest waits in the media pool. "
+                    "`flow magnific undo` takes the last one back.",
+           "playhead": f"New creations go to the media pool; {slots_say}, and the rest onto the open timeline at the "
+                       f"playhead, on the track “{TRACK['video']}” (stills {cfg['still_seconds']:g} s). "
+                       "`flow magnific undo` takes the last one back."}[where]
     return {"place": where, "still_seconds": cfg["still_seconds"], "say": say}
 
 
@@ -948,7 +1175,10 @@ def status(resolve: bool = False, connect: Optional[Callable[[], Any]] = None) -
     pulled = _load("pulled.json", {})
     placed = [e for e in _load("placed.json", []) if not e.get("undone")]
     pid = running()
+    unplaced = [{"file": r, "at": h.get("at"), "slot": h.get("slot"), "note": h.get("slot_note")}
+                for r, h in imported if not h.get("placed")][-10:]
     return {"folder": str(root), "folder_set": bool(cfg.get("folder")), "exists": root.is_dir(),
+            "unplaced": unplaced,
             "place": cfg["place"], "still_seconds": cfg["still_seconds"], "interval": cfg["interval"],
             "watcher": pid, "log": str(log_file()), "imported": len(imported),
             "recent": [{"file": r, "at": h.get("at"), "project": h.get("project"),
@@ -964,8 +1194,10 @@ def format_status(s: dict) -> str:
     lines = [f"MAGNIFIC · folder {s['folder']}" + ("" if s["folder_set"] else " (default)")
              + ("" if s["exists"] else " (doesn't exist yet)"),
              f"watcher: {'on (pid %d)' % s['watcher'] if s['watcher'] else 'off'} · new creations → "
-             + ("media pool bin Flow › Magnific" if s["place"] == "bin"
-                else f"media pool + timeline at the playhead (track {TRACK['video']}, stills {s['still_seconds']:g} s)"),
+             + {"bin": "media pool bin Flow › Magnific",
+                "slots": "media pool + their slot on the open timeline, when they name one",
+                "playhead": f"media pool + their slot, or the playhead (track {TRACK['video']}, "
+                            f"stills {s['still_seconds']:g} s)"}.get(s["place"], s["place"]),
              f"{s['imported']} imported"
              + (f" · {len(s['waiting'])} waiting" if s["waiting"] else "")
              + (f" · {s['left_alone']} left alone (were there before)" if s["left_alone"] else "")
@@ -978,7 +1210,12 @@ def format_status(s: dict) -> str:
                         if rv.get("timeline") else " · no timeline open"))
     for r in s["recent"]:
         pl = r.get("placed")
-        lines.append(f"  {r['at']}  {r['file']}" + (f"  → “{pl['timeline']}” at {pl['seconds']:.2f}s" if pl else ""))
+        lines.append(f"  {r['at']}  {r['file']}" + (f"  → {pl['slot'] + ' on ' if pl.get('slot') else ''}"
+                                                    f"“{pl['timeline']}” at {pl['seconds']:.2f}s" if pl else ""))
+    for u in s.get("unplaced", [])[-5:]:
+        if u.get("slot") or s["place"] != "bin":
+            lines.append(f"  new, not placed: {u['file']}" + (f" (for {u['slot']}: {u['note']})" if u.get("note")
+                                                              else f" (for {u['slot']})" if u.get("slot") else ""))
     for w in s["waiting"][:5]:
         lines.append(f"  waiting: {w}")
     for f in s["failed"][:5]:

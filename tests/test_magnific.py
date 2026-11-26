@@ -35,16 +35,62 @@ def media(path: Path, kind: str, seconds: float = 2.0) -> Path:
 
 
 # ---------------------------------------------------------------- a small fake Resolve
+class FakeMarkers:
+    """Markers like Resolve's: one per frame, hidden data in customData."""
+    def _m(self):
+        if not hasattr(self, "markers"):
+            self.markers = {}
+        return self.markers
+
+    def GetMarkers(self):
+        return {f: dict(i) for f, i in self._m().items()}
+
+    def AddMarker(self, frame, color, name, note, duration, custom=""):
+        if frame in self._m():
+            return False
+        self._m()[frame] = {"color": color, "name": name, "note": note, "duration": duration, "customData": custom}
+        return True
+
+    def DeleteMarkerAtFrame(self, frame):
+        return self._m().pop(frame, None) is not None
+
+    def UpdateMarkerCustomData(self, frame, data):
+        if frame not in self._m():
+            return False
+        self._m()[frame]["customData"] = data
+        return True
+
+    def GetMarkerByCustomData(self, data):
+        return {f: dict(i) for f, i in self._m().items() if i.get("customData") == data}
+
+
 class FakeMPI:
     def __init__(self, path, uid):
         self.path, self.uid = path, uid
         self.meta, self.third, self.color = {}, {}, None
+        self.frames = None
+
+    def _frames(self):
+        if self.frames is None:
+            try:
+                from flow.util import ffprobe
+                f = ffprobe(Path(self.path))
+                self.frames = str(int(round(f["duration"] * (f["fps"] or 24))))
+            except Exception:
+                self.frames = "48"
+        return self.frames
 
     def GetClipProperty(self, k=None):
         ext = Path(self.path).suffix.lower()
         d = {"File Path": self.path, "Clip Name": Path(self.path).name,
-             "Frames": "" if ext in (".png", ".wav") else "48", "FPS": "" if ext == ".wav" else "24.000"}
+             "Frames": "" if ext in (".png", ".wav") else self._frames(), "FPS": "" if ext == ".wav" else "24.000"}
         return d if k is None else d.get(k)
+
+    def GetThirdPartyMetadata(self, k=None):
+        return dict(self.third) if k is None else self.third.get(k, "")
+
+    def GetMetadata(self, k=None):
+        return dict(self.meta) if k is None else self.meta.get(k, "")
 
     def GetUniqueId(self):
         return self.uid
@@ -82,13 +128,70 @@ class FakeFolder:
         return list(self.subs)
 
 
-class FakeItem:
+class FakeItem(FakeMarkers):
     n = 0
 
-    def __init__(self, mpi, start, dur):
+    def __init__(self, mpi, start, dur, lo=0, name=None):
         FakeItem.n += 1
         self.mpi, self.start, self.dur, self.ro, self.uid = mpi, start, dur, 0, f"ti{FakeItem.n}"
-        self.color = None
+        self.color, self.lo, self.name, self.enabled, self.props = None, lo, name, True, {}
+        self.takes, self.sel = [], 0
+
+    def GetType(self):
+        return "video"
+
+    def GetMediaPoolItem(self):
+        return self.mpi
+
+    def GetLeftOffset(self):
+        return self.lo
+
+    def SetName(self, name):
+        self.name = name
+        return True
+
+    def GetClipEnabled(self):
+        return self.enabled
+
+    def SetClipEnabled(self, on):
+        self.enabled = bool(on)
+        return True
+
+    def SetProperty(self, k, v):
+        self.props[k] = v
+        return True
+
+    # takes, like Resolve 21.2 (live test): the first AddTake makes the clip a take selector (its own clip is
+    # take 1); selecting a shorter take shrinks the clip for good, a longer one keeps its length
+    def AddTake(self, mpi, s=None, e=None):
+        if not self.takes:
+            self.takes, self.sel = [(self.mpi, self.lo, self.lo + self.dur)], 1
+        s = 0 if s is None else s
+        e = int(mpi.GetClipProperty("Frames") or 0) if e is None else e
+        self.takes.append((mpi, s, e))
+        return True
+
+    def GetTakesCount(self):
+        return len(self.takes)
+
+    def GetSelectedTakeIndex(self):
+        return self.sel
+
+    def SelectTakeByIndex(self, n):
+        if not 1 <= n <= len(self.takes):
+            return False
+        mpi, s, e = self.takes[n - 1]
+        self.mpi, self.sel, self.lo = mpi, n, s
+        self.dur = min(self.dur, e - s)
+        return True
+
+    def DeleteTakeByIndex(self, n):
+        if not 1 <= n <= len(self.takes) or n == self.sel:
+            return False
+        self.takes.pop(n - 1)
+        if self.sel > n:
+            self.sel -= 1
+        return True
 
     def GetStart(self):
         return self.start
@@ -103,7 +206,7 @@ class FakeItem:
         return self.uid
 
     def GetName(self):
-        return self.mpi.GetName()
+        return self.name or self.mpi.GetName()
 
     def GetRightOffset(self):
         return self.ro
@@ -118,16 +221,19 @@ class FakeItem:
         return True
 
 
-class FakeTL:
+class FakeTL(FakeMarkers):
     def __init__(self, name="My Edit", fps=24.0, start=86400, playhead=48):
         self.name, self.fps, self.start, self.playhead = name, fps, start, playhead
         self.tracks = {"video": [{"name": "Video 1", "items": []}], "audio": [{"name": "Audio 1", "items": []}]}
+        self.settings = {"timelineFrameRate": str(fps), "timelineResolutionWidth": "1920",
+                         "timelineResolutionHeight": "1080"}
+        self.insert_ok = True          # AddTrack("video", {"index": n}) puts a track in between (Resolve 21)
 
     def GetName(self):
         return self.name
 
     def GetSetting(self, k):
-        return str(self.fps) if k == "timelineFrameRate" else None
+        return self.settings.get(k)
 
     def GetStartFrame(self):
         return self.start
@@ -151,8 +257,25 @@ class FakeTL:
         return True
 
     def AddTrack(self, kind, sub=None):
-        self.tracks[kind].append({"name": f"{kind} {len(self.tracks[kind]) + 1}", "items": []})
+        new = {"name": f"{kind} {len(self.tracks[kind]) + 1}", "items": []}
+        if isinstance(sub, dict) and "index" in sub and self.insert_ok:
+            self.tracks[kind].insert(int(sub["index"]) - 1, new)
+        else:
+            self.tracks[kind].append(new)
         return True
+
+    def DeleteTrack(self, kind, k):
+        if not 1 <= k <= len(self.tracks[kind]):
+            return False
+        self.tracks[kind].pop(k - 1)
+        return True
+
+    def put(self, k, it):
+        """A clip of the user's on video track k (made if needed)."""
+        while len(self.tracks["video"]) < k:
+            self.tracks["video"].append({"name": f"Video {len(self.tracks['video']) + 1}", "items": []})
+        self.tracks["video"][k - 1]["items"].append(it)
+        return it
 
     def GetItemListInTrack(self, kind, k):
         return list(self.tracks[kind][k - 1]["items"])
@@ -200,7 +323,8 @@ class FakeMP:
         for info in infos:
             self.appends.append(info)
             kind = "audio" if info.get("mediaType") == 2 else "video"
-            it = FakeItem(info["mediaPoolItem"], info["recordFrame"], info["endFrame"] - info["startFrame"])
+            it = FakeItem(info["mediaPoolItem"], info["recordFrame"], info["endFrame"] - info["startFrame"],
+                          lo=info["startFrame"])
             self.tl.tracks[kind][info["trackIndex"] - 1]["items"].append(it)
             self.tl.playhead = it.GetEnd() - self.tl.start  # like Resolve: the playhead jumps to the new clip's end
             out.append(it)
@@ -552,6 +676,320 @@ class Cli(Base):
         def closed():
             raise FlowError("not running")
         self.assertIsNone(mg.status(resolve=True, connect=closed)["resolve"])
+
+
+# ---------------------------------------------------------------- slots: creations built into the edit
+from flow import magnific_slots as ms  # noqa: E402
+
+
+class SlotRules(Base):
+    def test_slot_ids_in_names(self):
+        self.assertEqual(ms.slot_in_name("S3 · harbour drone"), "S3")
+        self.assertEqual(ms.slot_in_name("[S12] city"), "S12")
+        self.assertEqual(ms.slot_in_name(None, "20261126-101500_S3-Harbour-dusk.mov"), "S3")
+        self.assertIsNone(ms.slot_in_name("S01E02 pilot"))
+        self.assertIsNone(ms.slot_in_name("Sunset over S3"))
+        self.assertEqual((ms.norm_id("s4"), ms.norm_id(" 7 ")), ("S4", "S7"))
+        with self.assertRaises(FlowError):
+            ms.norm_id("harbour")
+
+    def test_match_uses_sure_signals_only(self):
+        recs = {"S1": {"creation": "c-1", "status": "filled"},
+                "S2": {"creation": "c-9", "versions": ["c-5"], "status": "filled"},
+                "S3": {"creation": "c-7", "status": "gone"}}
+        self.assertEqual(ms.match({"slot": "s2"}, "x.mov", recs), ("S2", "made for it"))
+        self.assertEqual(ms.match({"title": "S1 · harbour"}, "x.mov", recs)[0], "S1")
+        self.assertEqual(ms.match({"version_of": "c-1"}, "x.mov", recs)[0], "S1")
+        self.assertEqual(ms.match({"version_of": "c-5"}, "x.mov", recs)[0], "S2")   # a version of an older one
+        self.assertEqual(ms.match({"version_of": "c-7"}, "x.mov", recs), (None, None))  # its slot is gone
+        self.assertEqual(ms.match({"title": "harbour at dusk"}, "harbour.mov", recs), (None, None))
+
+    def test_fit(self):
+        self.assertEqual(ms.fit("video", 48, 24.0, 3.0, 24.0), "ok")
+        self.assertEqual(ms.fit("video", 48, 24.0, 1.9, 24.0), "slow")      # within 10 %: slowed to fit
+        self.assertEqual(ms.fit("video", 48, 24.0, 1.5, 24.0), "short")
+        self.assertEqual(ms.fit("image", 480, 24.0, 0.0, 0.0), "ok")
+        self.assertEqual(ms.need_frames(48, 24.0, 30.0), 60)                  # 2 s of a 30 fps clip
+        self.assertEqual(ms.need_frames(50, 25.0, 23.976), 48)
+
+    def test_what_reads_as_a_broll_ask(self):
+        for t in ("B-roll: drone, slow push in", "drone over the harbour", "[b roll] city", "Insert shot: hands"):
+            self.assertTrue(ms.reads_as_broll(t), t)
+        for t in ("cut the drone shot", "slow push in", "Placeholder title", ""):
+            self.assertFalse(ms.reads_as_broll(t), t)
+        self.assertTrue(ms._broll_marker({"color": "Lavender", "name": "", "note": ""}))
+        self.assertFalse(ms._broll_marker({"color": "Lavender", "customData": "flow"}))       # Finish mode's own
+        self.assertTrue(ms._broll_marker({"color": "Green", "customData": "flow:slot:S2"}))   # filled: still a slot
+
+
+class SlotScan(Base):
+    def setUp(self):
+        super().setUp()
+        self.rs = FakeResolve()
+        self.tl = tl = self.rs.tl
+        tl.put(1, FakeItem(FakeMPI("/media/aroll.mov", "a1"), tl.start, 240))
+        tl.AddMarker(48, "Lavender", "", "harbour at dusk", 48)               # a B-roll marker, 2 s
+        tl.AddMarker(120, "Blue", "B-roll: city lights", "", 1)               # says B-roll; no length: 2 s
+        tl.AddMarker(200, "Red", "cut this", "", 1)                           # not a slot
+        tl.AddMarker(220, "Lavender", "✓ B-roll", "done by Finish", 1, "flow")  # Flow's own note: not a slot
+        self.ph = tl.put(2, FakeItem(FakeMPI("/media/solid.mov", "s1"), tl.start + 150, 30, name="B-roll: shop front"))
+        mag = FakeMPI("/media/mag.mov", "m1")
+        mag.third["Magnific Creation"] = "c-old"
+        tl.put(2, FakeItem(mag, tl.start + 200, 40))
+        self.connect = lambda: self.rs
+
+    def test_finds_slots_and_ids_stick(self):
+        res = mg.slots(connect=self.connect)
+        got = [(s["id"], s["kind"], s["status"], s["f0"], s["f1"]) for s in res["slots"]]
+        self.assertEqual(got, [("S1", "marker", "open", 48, 96), ("S2", "marker", "open", 120, 168),
+                               ("S3", "placeholder", "open", 150, 180), ("S4", "clip", "filled", 200, 240)])
+        self.assertEqual(res["marked"], 3)
+        self.assertEqual(self.tl.markers[48]["customData"], "flow:slot:S1")
+        self.assertEqual(self.tl.markers[120]["customData"], "flow:slot:S2")
+        self.assertEqual(self.ph.markers[0]["customData"], "flow:slot:S3")    # a small marker on the placeholder
+        self.assertEqual((self.tl.markers[200]["customData"], self.tl.markers[220]["customData"]), ("", "flow"))
+        text = ms.format_slots(res)
+        self.assertIn("S4   filled", text)
+        self.assertIn("new versions become takes", text)
+        # again: the same ids and nothing to mark; a moved marker keeps its id (it carries it)
+        self.tl.markers[132] = self.tl.markers.pop(120)
+        res = mg.slots(connect=self.connect)
+        self.assertEqual([(s["id"], s["f0"]) for s in res["slots"]], [("S1", 48), ("S2", 132), ("S3", 150), ("S4", 200)])
+        self.assertEqual(res["marked"], 0)
+        # a copy of a slot's marker gets an id of its own; a deleted one is gone
+        self.tl.AddMarker(300, "Lavender", "", "harbour again", 24, "flow:slot:S1")
+        del self.tl.markers[132]
+        res = mg.slots(connect=self.connect)
+        self.assertEqual([s["id"] for s in res["slots"]], ["S1", "S3", "S4", "S5"])
+        self.assertEqual(self.tl.markers[300]["customData"], "flow:slot:S5")
+        self.assertEqual(ms.load("Client Job")["slots"]["S2"]["status"], "gone")
+
+    def test_read_only_and_no_timeline(self):
+        res = mg.slots(mark=False, connect=self.connect)
+        self.assertEqual((len(res["slots"]), res["marked"]), (4, 0))
+        self.assertEqual(self.tl.markers[48]["customData"], "")
+        self.assertEqual(self.ph.markers, {})
+        self.rs.project.tl = None
+        with self.assertRaises(FlowError):
+            mg.slots(connect=self.connect)
+
+
+@unittest.skipUnless(HAVE_FFMPEG, "needs ffmpeg")
+class SlotBuild(Base):
+    def setUp(self):
+        super().setUp()
+        mg.set_folder(str(self.folder))
+        self.rs = FakeResolve()
+        self.tl = tl = self.rs.tl
+        tl.playhead = 10
+        tl.put(1, FakeItem(FakeMPI("/media/aroll.mov", "a1"), tl.start, 240))
+        self.connect = lambda: self.rs
+        self.src = self.td / "src"
+
+    def video(self, name, seconds):
+        return str(media(self.src / name, "video", seconds))
+
+    def items(self, k):
+        return self.tl.tracks["video"][k - 1]["items"]
+
+    def names(self):
+        return [t["name"] for t in self.tl.tracks["video"]]
+
+    def test_slots_mode_fills_a_marker_slot_and_undo(self):
+        tl = self.tl
+        tl.AddMarker(48, "Lavender", "", "harbour at dusk", 48)
+        self.assertEqual([s["id"] for s in mg.slots(connect=self.connect)["slots"]], ["S1"])
+        mg.set_place("slots")
+        self.rs.mp.cur = viewing = FakeFolder("Selects")
+        p = mg.pull(file=self.video("v1.mp4", 3), name="Harbour dusk", creation="c-1", slot="S1")
+        self.assertIn("_S1-Harbour-dusk", p["name"])                       # the file says which slot it is for
+        res = mg.sync(connect=self.connect)
+        self.assertEqual([x["op"] for x in res["placed"]], ["fill"])
+        self.assertEqual(self.names(), ["Video 1", "Flow B-roll"])
+        (it,) = self.items(2)
+        self.assertEqual((it.GetStart() - tl.start, it.GetDuration(), it.lo), (48, 48, 12))  # the middle of 3 s
+        self.assertEqual((it.GetName(), it.color), ("S1 · Harbour dusk", "Purple"))
+        self.assertEqual((tl.markers[48]["color"], tl.markers[48]["customData"]), ("Green", "flow:slot:S1"))
+        self.assertEqual(tl.playhead, 10)                                   # the user's playhead stays
+        self.assertIs(self.rs.mp.cur, viewing)                              # and the bin they had open
+        self.assertEqual(len(self.items(1)), 1)                             # the A-roll: untouched
+        self.assertIn("→ S1", mg.format_sync(res))
+        self.assertEqual(mg.sync(connect=self.connect)["placed"], [])       # nothing twice
+        s1 = mg.slots(connect=self.connect)["slots"][0]
+        self.assertEqual((s1["status"], s1["creation"]), ("filled", "c-1"))
+        # undo: the clip and its track go, the marker is Lavender again, the slot is open
+        self.assertIn("took", mg.undo(connect=self.connect)["say"])
+        self.assertEqual(self.names(), ["Video 1"])
+        self.assertEqual(tl.markers[48]["color"], "Lavender")
+        self.assertEqual(mg.slots(connect=self.connect)["slots"][0]["status"], "open")
+
+    def test_put_fills_a_placeholder_and_switches_it_off(self):
+        tl = self.tl
+        tl.tracks["video"][0]["items"] = [
+            FakeItem(FakeMPI("/media/aroll.mov", "a1"), tl.start, 96),
+            FakeItem(FakeMPI("/media/solid.mov", "s1"), tl.start + 96, 48, name="B-roll: shop front"),
+            FakeItem(FakeMPI("/media/aroll.mov", "a1"), tl.start + 144, 96)]
+        ph = self.items(1)[1]
+        self.assertEqual(mg.slots(connect=self.connect)["slots"][0]["kind"], "placeholder")
+        res = mg.put(self.video("shop.mp4", 2), "s1", connect=self.connect)   # bin mode: put is the user's ask
+        self.assertEqual((res["op"], res["slot"]), ("fill", "S1"))
+        self.assertIn("is in S1", res["say"])
+        self.assertFalse(ph.enabled)                                          # switched off, not deleted
+        self.assertEqual(len(self.items(1)), 3)
+        (it,) = self.items(2)
+        self.assertEqual((it.GetStart() - tl.start, it.GetDuration()), (96, 48))
+        self.assertEqual(mg.slots(connect=self.connect)["slots"][0]["status"], "filled")
+        self.assertIn("placeholder is back on", mg.undo(connect=self.connect)["say"])
+        self.assertTrue(ph.enabled)
+        self.assertEqual(self.names(), ["Video 1"])
+
+    def test_a_fill_never_covers_the_users_clips(self):
+        tl = self.tl
+        tl.put(2, FakeItem(FakeMPI("/media/title.mov", "t1"), tl.start + 40, 60, name="Title"))
+        tl.SetTrackName("video", 2, "Titles")
+        tl.AddMarker(48, "Lavender", "", "harbour", 48)
+        mg.slots(connect=self.connect)
+        f = self.video("h.mp4", 2)
+        tl.insert_ok = False                          # a Resolve that adds tracks only on top
+        with self.assertRaises(FlowError) as cm:
+            mg.put(f, "S1", connect=self.connect)
+        self.assertIn("cover V2 Titles", str(cm.exception))
+        self.assertEqual(self.names(), ["Video 1", "Titles"])                 # no track left behind
+        self.assertEqual(tl.playhead, 10)
+        tl.insert_ok = True                           # Resolve 21: a new track right above the slot
+        res = mg.put(f, "S1", connect=self.connect)
+        self.assertEqual(self.names(), ["Video 1", "Flow B-roll", "Titles"])  # the title stays on top
+        self.assertEqual((res["track"], len(self.items(2)), len(self.items(3))), (2, 1, 1))
+
+    def test_new_versions_become_takes_on_their_clip(self):
+        tl = self.tl
+        tl.AddMarker(48, "Lavender", "", "harbour", 48)
+        mg.slots(connect=self.connect)
+        mg.set_place("slots")
+        mg.pull(file=self.video("v1.mp4", 3), name="Harbour", creation="c-1", slot="S1")
+        mg.sync(connect=self.connect)
+        (it,) = self.items(2)
+        # a new version of c-1: a take on the same clip, same spot, same length
+        mg.pull(file=self.video("v2.mp4", 2.5), name="Harbour v2", creation="c-2", version_of="c-1")
+        res = mg.sync(connect=self.connect)
+        self.assertEqual([x["op"] for x in res["placed"]], ["take"])
+        self.assertIn("new take", mg.format_sync(res))
+        self.assertEqual((it.GetTakesCount(), it.GetSelectedTakeIndex()), (2, 2))
+        self.assertEqual((it.GetStart() - tl.start, it.GetDuration()), (48, 48))
+        self.assertIn("Harbour-v2", it.GetMediaPoolItem().GetName())
+        rec = ms.load("Client Job")["slots"]["S1"]
+        self.assertEqual((rec["creation"], rec["versions"]), ("c-2", ["c-1"]))
+        # too short for its slot: it waits in the media pool, and says why
+        mg.pull(file=self.video("v3.mp4", 1), name="Harbour v3", creation="c-3", version_of="c-2")
+        res = mg.sync(connect=self.connect)
+        self.assertEqual(res["placed"], [])
+        self.assertTrue(any("S1 needs 2.00s" in n for n in res["notes"]), res["notes"])
+        st = mg.status()
+        self.assertEqual(st["unplaced"][-1]["slot"], "S1")
+        self.assertIn("new, not placed", mg.format_status(st))
+        self.assertEqual(it.GetTakesCount(), 2)
+        # a little short (1.9 s for 2 s): a slowed copy that fits exactly
+        mg.pull(file=self.video("v4.mp4", 1.9), name="Harbour v4", creation="c-4", slot="S1")
+        res = mg.sync(connect=self.connect)
+        self.assertEqual([x["op"] for x in res["placed"]], ["take"])
+        self.assertEqual((it.GetTakesCount(), it.GetDuration()), (3, 48))
+        slowed = it.GetMediaPoolItem()
+        self.assertEqual(Path(slowed.path).parent, self.home / "magnific" / "fit")
+        self.assertEqual(slowed.GetClipProperty("Frames"), "48")
+        self.assertIn("slowed to fit S1", slowed.meta["Description"])
+        # undo: back to the version before, which stays one click away
+        self.assertIn("earlier version", mg.undo(connect=self.connect)["say"])
+        self.assertEqual((it.GetTakesCount(), it.GetSelectedTakeIndex()), (2, 2))
+        self.assertEqual(ms.load("Client Job")["slots"]["S1"]["creation"], "c-2")
+
+    def test_a_take_that_would_change_the_clip_is_taken_back(self):
+        self.tl.AddMarker(48, "Lavender", "", "harbour", 48)
+        mg.slots(connect=self.connect)
+        mg.put(self.video("v1.mp4", 2), "S1", connect=self.connect)
+        (it,) = self.items(2)
+        select = FakeItem.SelectTakeByIndex
+
+        def moving(item, n):              # a Resolve that shifts the clip when a take is picked
+            ok = select(item, n)
+            if n > 1:
+                item.start += 1
+            return ok
+        with mock.patch.object(FakeItem, "SelectTakeByIndex", moving):
+            with self.assertRaises(FlowError) as cm:
+                mg.put(self.video("v2.mp4", 2), "S1", connect=self.connect)
+        self.assertIn("taken back", str(cm.exception))
+        self.assertEqual((it.GetTakesCount(), it.GetSelectedTakeIndex()), (1, 1))
+
+    def test_playhead_mode_puts_slot_creations_in_their_slot(self):
+        tl = self.tl
+        tl.AddMarker(120, "Lavender", "", "harbour", 48)
+        mg.slots(connect=self.connect)
+        mg.set_place("playhead", still_seconds=2)
+        a = mg.pull(file=self.video("s1.mp4", 2), name="S1 · harbour")          # named for its slot
+        b = mg.pull(file=self.video("free.mp4", 2), name="Something else")
+        c = mg.pull(file=self.video("short.mp4", 1), name="Short", slot="S1")   # too short for S1
+        res = mg.sync(connect=self.connect)
+        ops = {Path(x["file"]).name: x["op"] for x in res["placed"]}
+        self.assertEqual(ops, {a["name"]: "fill", b["name"]: "playhead"})
+        self.assertNotIn(c["name"], ops)                                     # waits; not at the playhead either
+        self.assertEqual(set(self.names()), {"Video 1", "Flow B-roll", "Flow Magnific"})
+        self.assertEqual(tl.playhead, 10)
+
+    def test_bin_mode_says_where_it_fits_and_put_places_it(self):
+        self.tl.AddMarker(48, "Lavender", "", "harbour", 48)
+        mg.slots(connect=self.connect)
+        p = mg.pull(file=self.video("v1.mp4", 2), name="Harbour", slot="S1")
+        res = mg.sync(connect=self.connect)
+        self.assertEqual(res["placed"], [])
+        self.assertEqual(self.names(), ["Video 1"])                          # bin mode: the timeline is untouched
+        self.assertTrue(any("fits S1" in n and "flow magnific put" in n for n in res["notes"]), res["notes"])
+        self.assertEqual([u["slot"] for u in mg.status()["unplaced"]], ["S1"])
+        out = mg.put(p["name"], "S1", connect=self.connect)                 # a name in the folder is enough
+        self.assertEqual(out["op"], "fill")
+        self.assertEqual(mg.status()["unplaced"], [])
+        mg.set_place("slots")
+        self.assertEqual(mg.sync(connect=self.connect)["placed"], [])        # the watcher doesn't put it in again
+
+    def test_a_slot_on_another_timeline_waits(self):
+        self.tl.AddMarker(48, "Lavender", "", "harbour", 48)
+        mg.slots(connect=self.connect)
+        other = FakeTL(name="Other cut")
+        self.rs.project.tl = self.rs.mp.tl = other
+        mg.set_place("slots")
+        mg.pull(file=self.video("v1.mp4", 2), name="Harbour", slot="S1")
+        res = mg.sync(connect=self.connect)
+        self.assertEqual(res["placed"], [])
+        self.assertTrue(any("on “My Edit”: open that timeline" in n for n in res["notes"]), res["notes"])
+        with self.assertRaises(FlowError):
+            mg.put(self.video("v2.mp4", 2), "S1", connect=self.connect)
+        with self.assertRaises(FlowError):
+            mg.put(self.video("v3.mp4", 2), "S9", connect=self.connect)
+
+    def test_cli_slots_pull_and_put(self):
+        from flow import resolve_bridge as rb
+        from flow.cli import main
+        self.tl.AddMarker(48, "Lavender", "", "harbour", 48)
+
+        def cli(*argv):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = main(list(argv))
+            return rc, buf.getvalue()
+        with mock.patch.object(rb, "_injected", self.rs):
+            rc, out = cli("magnific", "slots")
+            self.assertEqual(rc, 0)
+            self.assertIn("S1   open", out)
+            rc, out = cli("magnific", "slots", "--json", "--no-mark")
+            self.assertEqual(json.loads(out)["slots"][0]["id"], "S1")
+            rc, out = cli("magnific", "pull", "--file", self.video("v1.mp4", 2), "--name", "Harbour", "--slot", "S1")
+            self.assertEqual(rc, 0)
+            name = out.split(" is in ")[0].strip()
+            self.assertIn("_S1-Harbour", name)
+            rc, out = cli("magnific", "put", name, "--slot", "S1", "--in", "0")
+            self.assertEqual(rc, 0)
+            self.assertIn("is in S1", out)
+            rc, out = cli("magnific", "place", "slots")
+            self.assertIn("go straight into it", out)
 
 
 if __name__ == "__main__":

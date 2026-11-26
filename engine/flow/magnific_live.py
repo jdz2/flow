@@ -13,6 +13,12 @@ playhead placement of a video, a still, a WAV and a video with sound, undo, the 
 and probes what the next Magnific steps need: a new version as a take on a clip, a clip dropped into
 a gap between two clips (exactly, and too long), ReplaceClip, markers that carry a slot id, and the
 provenance tags in a file Magnific delivered.
+
+Then the slots (magnific_slots.py), on a second timeline "Flow Magnific Slots <time>": a Lavender marker
+under a title and a placeholder clip become S1 and S2; a creation made for S1 fills it on a Flow B-roll
+track in between (Resolve 21 adds a track at an index; an older one refuses rather than cover the title),
+one for S2 fills the placeholder and switches it off, a new version becomes a take, a slightly short one
+a slowed take, and undo takes all four back.
 """
 from __future__ import annotations
 
@@ -32,6 +38,9 @@ FPS = 30
 W, H = 1080, 1920
 PROMPT = "Drone shot over a small harbour at dusk, slow push in, warm lights on the water"
 CORE = ("bin_import", "playhead_video", "playhead_still", "playhead_audio", "playhead_sound", "undo", "watcher")
+SLOTS = ("slots_setup", "slots_scan", "slots_fill_under_title", "slots_fill_placeholder", "slots_take",
+         "slots_take_slowed", "slots_undo")
+PLACEHOLDER = "Placeholder shop front.mov"
 
 
 # ---------------------------------------------------------------- test media (ffmpeg)
@@ -113,6 +122,12 @@ def make_media(d: Path) -> dict:
         "gapfill.mov": lambda p: _ff(_pic("color=c=0x6a0dad", 4) + PRORES + [str(p)]),
         "replace_a.mov": lambda p: _ff(_pic("color=c=0xc0392b", 2) + PRORES + [str(p)]),
         "replace_b.mov": lambda p: _ff(_pic("color=c=0x27ae60", 2) + PRORES + [str(p)]),
+        PLACEHOLDER: lambda p: _ff(_pic("color=c=0x808080", 3) + PRORES + [str(p)]),
+        "title.mov": lambda p: _ff(_pic("color=c=0xf5f5f5", 2) + PRORES + [str(p)]),
+        "slot_s1.mov": lambda p: _ff(_pic("testsrc2", 2.5) + PRORES + [str(p)]),
+        "slot_s1_v2.mov": lambda p: _ff(_pic("smptebars", 2) + PRORES + [str(p)]),
+        "slot_s2.mov": lambda p: _ff(_pic("rgbtestsrc", 2) + PRORES + [str(p)]),
+        "slot_s2_v2.mov": lambda p: _ff(_pic("yuvtestsrc", 1.4) + PRORES + [str(p)]),   # 42 of 45 frames
     }
     files, skipped = {}, {}
     for name, make in jobs.items():
@@ -223,7 +238,7 @@ def _tags(p: str) -> dict:
 def run_live(switch: bool = False, url: Optional[str] = None, creation: Optional[str] = None,
              name: Optional[str] = None, prompt: Optional[str] = None, model: Optional[str] = None,
              out: Callable[[str], None] = print) -> dict:
-    from flow import magnific as mg, probe, resolve_bridge as rb
+    from flow import magnific as mg, magnific_slots as ms, probe, resolve_bridge as rb
     from flow.build import _caps, _import_into
     from flow.find_clip import _file_path, find_media_pool_item
 
@@ -549,6 +564,138 @@ def run_live(switch: bool = False, url: Optional[str] = None, creation: Optional
             return {"ok": o.get("tl_add") is True, **o}
         test("probe_markers", markers, need=["tl"])
 
+        # ------------------------------------------------ slots: creations built into the edit
+        def markers_of(host: Any) -> Dict[int, Any]:
+            got = _call(host, "GetMarkers")
+            return {int(f): i for f, i in got.items()} if isinstance(got, dict) else {}
+
+        def slots_setup():
+            a = keep["aroll"]
+            need = [m[n] for n in (PLACEHOLDER, "title.mov") if find_media_pool_item(mp, m[n]) is None]
+            if need:
+                _import_into(mp, _bin(mp) or mp.GetRootFolder(), need)
+            ph, title = (find_media_pool_item(mp, m[n]) for n in (PLACEHOLDER, "title.mov"))
+            if ph is None or title is None:
+                raise FlowError("Resolve didn't import the placeholder and title clips")
+            nm = "Flow Magnific Slots " + time.strftime("%H%M%S")
+            tl = mp.CreateEmptyTimeline(nm)
+            project.SetCurrentTimeline(tl)
+            tl.SetSettings({"useCustomSettings": "1", "timelineResolutionWidth": str(W),
+                            "timelineResolutionHeight": str(H), "timelineFrameRate": str(FPS),
+                            "timelineInputResMismatchBehavior": "scaleToFit",
+                            "timelineOutputResMatchTimelineRes": "1"})
+            start = int(tl.GetStartFrame())
+            got = mp.AppendToTimeline([   # V1: A-roll 0-3 s, the placeholder 3-4.5 s (from its frame 15), A-roll
+                {"mediaPoolItem": a, "startFrame": 0, "endFrame": e(90), "trackIndex": 1, "recordFrame": start,
+                 "mediaType": 1},
+                {"mediaPoolItem": ph, "startFrame": 15, "endFrame": 15 + e(45), "trackIndex": 1,
+                 "recordFrame": start + 90, "mediaType": 1},
+                {"mediaPoolItem": a, "startFrame": 90, "endFrame": e(135), "trackIndex": 1,
+                 "recordFrame": start + 135, "mediaType": 1}]) or []
+            tl.AddTrack("video")
+            tl.SetTrackName("video", 2, "Titles")
+            got += mp.AppendToTimeline([{"mediaPoolItem": title, "startFrame": 0, "endFrame": e(50), "trackIndex": 2,
+                                         "recordFrame": start + 20, "mediaType": 1}]) or []
+            tl.AddMarker(30, "Lavender", "", "harbour at dusk, slow push in", 45, "")   # 1-2.5 s, under the title
+            keep.update(stl=tl, sstart=start, s_snap=_snap(tl), slot_ops=0)
+            return {"ok": len(got) == 4, "timeline": nm, "edit": keep["s_snap"], "markers": markers_of(tl),
+                    "placeholder_name": _call(_at(tl, "video", 1, start + 90), "GetName")}
+        test("slots_setup", slots_setup, need=["tl", "aroll"])
+
+        def slots_scan():
+            tl, start = keep["stl"], keep["sstart"]
+            r = mg.slots()
+            got = [[s["id"], s["kind"], s["status"], s["f0"], s["f1"]] for s in r["slots"]]
+            ph = _at(tl, "video", 1, start + 90)
+            F["slot_id_in_marker"] = (markers_of(tl).get(30) or {}).get("customData") == "flow:slot:S1"
+            F["placeholder_marker"] = {"left_offset": _call(ph, "GetLeftOffset"), "markers": markers_of(ph)}
+            ok = (got == [["S1", "marker", "open", 30, 75], ["S2", "placeholder", "open", 90, 135]]
+                  and F["slot_id_in_marker"])
+            return {"ok": ok, "slots": got, "marked": r["marked"], "text": ms.format_slots(r)}
+        test("slots_scan", slots_scan, need=["stl"])
+
+        def slot_put(file: str, name: str, slot: Optional[str] = None, creation: Optional[str] = None,
+                     version_of: Optional[str] = None) -> dict:
+            tl, start = keep["stl"], keep["sstart"]
+            mg.set_place("slots")
+            tl.SetCurrentTimecode(frames_to_tc(start + 10, FPS))
+            tc0 = tl.GetCurrentTimecode()
+            mg.pull(file=m[file], name=name, creation=creation, prompt=PROMPT, model="flow-test", slot=slot,
+                    version_of=version_of)
+            r = mg.sync(wait=True)
+            placed = [x for x in r.get("placed", []) if x.get("op") in ("fill", "take")]
+            keep["slot_ops"] += len(placed)
+            x = placed[0] if placed else {}
+            it = _at(tl, "video", x["track"], start + x["frame"]) if x else None
+            return {"x": x, "it": it, "sync": _brief(r), "playhead_kept": tl.GetCurrentTimecode() == tc0,
+                    "tracks": [tl.GetTrackName("video", k) for k in range(1, int(tl.GetTrackCount("video")) + 1)]}
+
+        def slots_fill_title():
+            tl, start = keep["stl"], keep["sstart"]
+            before, n0 = _snap(tl), tl.GetTrackCount("video")
+            o = slot_put("slot_s1.mov", "S1 harbour dusk", creation="flowtest-s1")
+            x, it = o.pop("x"), o.pop("it")
+            tk, _ = _track(tl, "video", "Titles")
+            if x:
+                o.update(item=[it.GetStart() - start, it.GetDuration(), _clip_name(it)] if it else None,
+                         fill_track=x["track"], titles_track=tk, made_track=x.get("made_track"))
+                F["add_track_index"] = tk == x["track"] + 1
+                ok = bool(it and it.GetStart() - start == 30 and it.GetDuration() == 45 and tk > x["track"])
+                keep["s1"] = True
+            else:   # a Resolve that can't add a track in between: refused, nothing changed
+                cover = any("would cover" in n for n in o["sync"].get("notes", []))
+                F["add_track_index"] = False if cover else None
+                ok = cover and _snap(tl) == before and tl.GetTrackCount("video") == n0
+            mk = markers_of(tl).get(30) or {}
+            F["fill_marker_green"] = mk.get("color") == "Green" if x else None
+            return {"ok": bool(ok and o["playhead_kept"]), "marker": mk, **o}
+        test("slots_fill_under_title", slots_fill_title, need=["stl"])
+
+        def slots_fill_ph():
+            tl, start = keep["stl"], keep["sstart"]
+            o = slot_put("slot_s2.mov", "S2 shop front", creation="flowtest-s2")
+            x, it = o.pop("x"), o.pop("it")
+            ph = _at(tl, "video", 1, start + 90)
+            F["placeholder_disabled"] = _call(ph, "GetClipEnabled") is False if ph is not None else None
+            ok = bool(x and it and it.GetStart() - start == 90 and it.GetDuration() == 45 and F["placeholder_disabled"])
+            if ok:
+                keep["s2"] = True
+            return {"ok": ok and o["playhead_kept"], "item": [it.GetStart() - start, it.GetDuration()] if it else None,
+                    "track": x.get("track"), **o}
+        test("slots_fill_placeholder", slots_fill_ph, need=["stl"])
+
+        def take_check(o: dict, f0: int, slowed: bool) -> dict:
+            x, it = o.pop("x"), o.pop("it")
+            start = keep["sstart"]
+            n, sel = _call(it, "GetTakesCount"), _call(it, "GetSelectedTakeIndex")
+            name = _clip_name(it) if it is not None else None
+            ok = bool(x and x.get("op") == "take" and it and it.GetStart() - start == f0 and it.GetDuration() == 45
+                      and n == sel and isinstance(n, int) and n >= 2 and (("-fit45" in str(name)) == slowed))
+            return {"ok": ok and o["playhead_kept"], "item": [it.GetStart() - start, it.GetDuration(), name] if it else None,
+                    "takes": n, "selected": sel, **o}
+
+        test("slots_take", lambda: take_check(slot_put("slot_s1_v2.mov", "Harbour dusk v2", creation="flowtest-s1b",
+                                                       version_of="flowtest-s1"), 30, False), need=["s1"])
+        test("slots_take_slowed", lambda: take_check(slot_put("slot_s2_v2.mov", "Shop front v2", slot="S2",
+                                                              creation="flowtest-s2b"), 90, True), need=["s2"])
+
+        def slots_undo():
+            tl = keep["stl"]
+            said = []
+            for _ in range(keep["slot_ops"]):
+                r = mg.undo()
+                said.append(r.get("say"))
+            snap = _snap(tl)
+            mk = markers_of(tl).get(30) or {}
+            ph = _at(tl, "video", 1, keep["sstart"] + 90)
+            o = {"said": said, "marker": mk, "placeholder_on": _call(ph, "GetClipEnabled") if ph else None,
+                 "edit_back": snap == keep["s_snap"]}
+            if not o["edit_back"]:
+                o["edit"] = snap
+            ok = o["edit_back"] and mk.get("color") == "Lavender" and o["placeholder_on"] is True
+            return {"ok": ok, **o}
+        test("slots_undo", slots_undo, need=["stl"])
+
         if url:
             def delivered():
                 mg.set_place("bin")
@@ -581,13 +728,15 @@ def run_live(switch: bool = False, url: Optional[str] = None, creation: Optional
         else:
             os.environ["FLOW_HOME"] = old_env
         res["ok"] = all((T.get(k) or {}).get("ok") for k in CORE) and "error" not in res
+        res["slots_ok"] = all((T.get(k) or {}).get("ok") for k in SLOTS) and "error" not in res
         save()
     return res
 
 
 def format_result(res: dict) -> str:
     lines = [f"Resolve {res.get('product', '?')} {res.get('version', '')} · Magnific live test "
-             + ("OK" if res.get("ok") else "had failures")]
+             + ("OK" if res.get("ok") else "had failures")
+             + (" · slots " + ("OK" if res.get("slots_ok") else "had failures") if "slots_ok" in res else "")]
     for k, v in res.get("tests", {}).items():
         mark = "✓" if v.get("ok") else ("-" if v.get("skipped") else "✗")
         lines.append(f"  {mark} {k} {v.get('error') or v.get('skipped') or ''}".rstrip())

@@ -209,7 +209,9 @@ changing; partial downloads are ignored.
    in). Then `flow magnific start`: a background watcher that keeps running after this chat. Say in one line
    where new creations land.
 2. **Where they go.** `flow magnific place bin` is the default: media pool only, no timeline is touched.
-   `flow magnific place playhead` (only when the user asks for it) also puts each new creation on the open
+   `flow magnific place slots` (only when the user asks for it) builds each creation made for a slot of the
+   open timeline straight into it (step 6); the rest waits in the media pool. `flow magnific place playhead`
+   (only when the user asks for it) does the same and also puts every other new creation on the open
    timeline at the playhead, on its own track "Flow Magnific" (sound files on "Flow Magnific Audio"), at the
    first spot of that track that is free for its whole length. Nothing already on the timeline is moved,
    trimmed or covered. Stills last `--still` seconds (default 5). `flow magnific undo` takes the last placed
@@ -223,6 +225,8 @@ changing; partial downloads are ignored.
    an editor format: video `prores_422hq` (`prores_4444` keeps the transparency of a cut-out), image
    `png16`, audio `wav_48k`; on `processing`, call again after `poll_after_seconds`. Then
    `flow magnific pull --url "<url>" --name "<short title>" --creation <id> --prompt "<prompt>" --model <slug>`.
+   Made for a slot: add `--slot S3`. A new version of a creation that is in the edit (the user says so, or
+   `creations_lineage` shows its parent): add `--version-of <parent creation id>`.
    If delivering fails, use `originals[].url` from `creations_register_download`, else the creation's `url`.
    The watcher imports the file within seconds; if it is off, run `flow magnific sync`. Report in one line
    what landed where (names and Magnific's webUrl, not ids).
@@ -230,7 +234,30 @@ changing; partial downloads are ignored.
    the project with `folders_list`, list its creations with `creations_search` (`folderReference`,
    `dateStart`), skip the ids in `flow magnific status --json` → `pulled_creations`, then deliver and pull
    each one as in step 4. For hands-off syncing, suggest `/loop 15m /flow:magnific sync <project>`.
-6. **In a reel**, Magnific videos work like any B-roll: `flow broll --bin Magnific`, then the plan's `broll`
+6. **Building into the edit (slots).** `flow magnific slots` lists the open timeline's slots and writes
+   their ids into Resolve (a marker's hidden data) so they stick: S1, S2 … for B-roll markers (Lavender, or
+   words that ask for B-roll: "B-roll: harbour at dusk"), B-roll placeholders (clips named "B-roll: …" or
+   "Placeholder …", placeholder Text+) and Magnific clips already in the edit. A creation finds its slot
+   only by a sure sign: `pull --slot S3`, a name that starts with the slot id ("S3 · harbour drone"), or
+   `pull --version-of <creation>`. Anything else stays in the media pool; never guess a slot.
+   - An open slot gets a new clip on a "Flow B-roll" track right above it (a new track in between when
+     something of the user's shows above, so nothing is covered), trimmed to the slot from the middle of a
+     longer creation (`put --in SEC` picks another part), cropped when its shape differs; the placeholder is
+     switched off and the marker turns green.
+   - A filled slot gets a new version as a take on its clip: same spot and length, and the earlier version
+     stays one click away in Resolve's take selector.
+   - A version up to 10 % shorter than its slot comes in as a slowed ProRes copy that fits exactly; a
+     shorter one waits in the media pool, and `flow magnific status` says why.
+   - In bin mode nothing is placed: status lists it as "new, not placed (for S3 …)". Build it in with
+     `flow magnific put "<file>" --slot S3` when the user asks. `flow magnific undo` takes fills and takes
+     back too.
+   **Directing the slots** ("make B-roll for the open slots", "fill S3"): `flow magnific slots --json`, then
+   for each open slot write a prompt from its `brief` and the edit around it, in the timeline's shape and at
+   least the slot's `seconds` long (video models come in fixed lengths: take the next longer one). Price the
+   whole batch with `simulate_cost`, say the total, and wait for one clear yes. Name each creation
+   "S3 · <short title>" and pull it with `--slot S3`. The user's ask covers putting them in: in bin mode run
+   `flow magnific put` for each. Report in one line which slots got what.
+7. **In a reel**, Magnific videos work like any B-roll: `flow broll --bin Magnific`, then the plan's `broll`
    list or `flow edit broll --broll-clip B7` at the playhead.
 
 `flow magnific status` shows what came in, what is waiting and whether the watcher runs; `flow magnific
@@ -240,7 +267,9 @@ stop` ends it. The watcher's log is `~/.flow/magnific/watch.log`.
 
 - Never switch projects, delete timelines or edit the user's original timeline. Ask first if something
   would need that. (`flow probe --switch` saves the project and opens a "Flow Sandbox" project; only use
-  it with the user's OK.) Magnific's playhead mode, which the user turns on, is the one exception.
+  it with the user's OK.) Magnific's slots and playhead modes and `flow magnific put`, which the user asks
+  for, are the one exception: they only add clips on Flow's own tracks, add takes to Magnific clips, and
+  switch B-roll placeholders off.
 - If Resolve refuses the connection: Preferences → System → General → External scripting using: Local
   (Studio only). On the free edition, build from inside Resolve with Workspace → Scripts → Flow Build
   after `flow compile`.
@@ -250,6 +279,7 @@ stop` ends it. The watcher's log is `~/.flow/magnific/watch.log`.
   without it.
 - Every AI generation costs the user credits: price it with `simulate_cost`, say the number, and only
   run it after a clear yes. Treat results as drafts: look at them before placing them.
-- Magnific creations go to the media pool unless the user turned on `flow magnific place playhead`; never
-  switch it on by yourself.
+- Magnific creations go to the media pool unless the user turned on `flow magnific place slots` or
+  `place playhead`; never switch either on by yourself. `flow magnific put` only on the user's ask (asking
+  to fill a slot counts).
 - Keep chat updates short. Flow's whole promise is speed.
