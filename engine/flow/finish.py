@@ -285,11 +285,34 @@ def apply(plan_path: Optional[Path] = None, live: Any = None) -> dict:
             seen[0] += 1
             solo.upto(nodetree.track_of(it))
             live.show(it.GetStart() - start + 1, 0.25, f"COLOR · {label} ({seen[0]}/{n_cand})" if seen[0] % 5 == 1 else None)
-        grade_rows = grade.grade_clips(project, cand, gc.get("look", "nightlife"), plan_path.parent / "grade",
-                                       float(gc.get("min", 0.6)), float(gc.get("max", 1.0)), match=match,
-                                       keep_green=set(gc.get("keep_green") or []),
-                                       on_clip=_on_clip if live.enabled else None,
-                                       nodes=bool(gc.get("nodes", True)), vignette=float(gc.get("vignette", 0.0)))
+        if gc.get("masks") or gc.get("reference"):
+            # mask tree: reference-matched (or named) look on 04 Look + rule-based qualifiers and windows
+            ref = gc.get("reference")
+            if ref and not Path(str(ref)).expanduser().exists():
+                r.fail("grade", f"reference image not found: {ref}")
+                ref = None
+            out = grade.grade_clips_masked(project, cand, plan_path.parent / "grade",
+                                           look=gc.get("look") if not ref else "reference",
+                                           reference=str(Path(str(ref)).expanduser()) if ref else None,
+                                           masks_cfg=gc.get("masks", True), subjects=gc.get("subjects"),
+                                           vignette=gc.get("vignette"), ref_strength=gc.get("reference_strength"),
+                                           replace=bool(gc.get("replace_existing", False)),
+                                           on_clip=_on_clip if live.enabled else None,
+                                           lo=float(gc.get("min", 0.6)), hi=float(gc.get("max", 1.0)))
+            grade_rows = out["rows"]
+            if out.get("reference"):
+                write_json(plan_path.parent / "reference_match.json", out["reference"])
+                r.ok("reference_match")
+            for row in grade_rows:
+                for lab in row.get("mask_nodes_on") or []:
+                    r.ok(f"mask:{lab.lower()}")
+        else:
+            grade_rows = grade.grade_clips(project, cand, gc.get("look", "nightlife"), plan_path.parent / "grade",
+                                           float(gc.get("min", 0.6)), float(gc.get("max", 1.0)), match=match,
+                                           keep_green=set(gc.get("keep_green") or []),
+                                           on_clip=_on_clip if live.enabled else None,
+                                           nodes=bool(gc.get("nodes", True)), vignette=float(gc.get("vignette", 0.0)),
+                                           soft=float(gc.get("soft", 0.0)))
         solo.restore()
         live.page("edit", 0.5)
         write_json(plan_path.parent / "grade_report.json", grade_rows)
@@ -321,6 +344,12 @@ def apply(plan_path: Optional[Path] = None, live: Any = None) -> dict:
                 warp = rb.const(resolve, "MOTION_EST_SPEED_WARP_FASTER")
                 if warp is not None:
                     it.SetProperty("MotionEstimation", warp)
+        if op.get("stabilize"):  # Resolve's stabilizer (Edit/Color inspector settings), analysed now
+            try:
+                ok = bool(it.Stabilize())
+            except Exception:
+                ok = False
+            r.ok("stabilize") if ok else r.fail("stabilize", ref)
         if op.get("retime"):  # optical flow (+ Speed Warp) on an existing speed change
             ok = it.SetProperty("RetimeProcess", rb.const(resolve, "RETIME_OPTICAL_FLOW"))
             warp = rb.const(resolve, "MOTION_EST_SPEED_WARP_FASTER")

@@ -58,8 +58,9 @@ def existing_grade(item: Any) -> Dict[str, Any]:
         except Exception:
             pass
     labels = [g.GetNodeLabel(i) or "" for i in range(1, n + 1)]
+    from flow.masks import TREE as MASK_TREE
     return {"graph": True, "nodes": n, "lut1": lut, "tools": tools, "labels": labels,
-            "flow_tree": labels[:len(LABELS)] == LABELS}
+            "flow_tree": labels[:len(LABELS)] == LABELS or labels[:len(MASK_TREE)] == MASK_TREE}
 
 
 def can_apply(item: Any, replace: bool = False) -> Tuple[bool, str]:

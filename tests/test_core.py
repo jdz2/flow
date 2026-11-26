@@ -642,6 +642,24 @@ class TestNightlife(unittest.TestCase):
         b = luts.nightlife_transform(warm=1.0)(warm_light)
         self.assertLess(b[0] - b[2], a[0] - a[2])
 
+    def test_soft_teal_soft_orange(self):
+        import colorsys
+        hard, soft = luts.nightlife_transform(), luts.nightlife_transform(soft=1.0)
+        for skin in [(0.78, 0.55, 0.45), (0.75, 0.45, 0.6)]:     # skin stays orange, but gentler
+            h, s = self.hue(soft(skin))
+            self.assertTrue(h < 45 or h > 352, h)
+            self.assertLess(s, self.hue(hard(skin))[1])
+            self.assertGreater(s, 0.2)
+        for neon in [(0.1, 0.25, 0.95), (0.15, 0.9, 0.2), (0.1, 0.75, 0.8)]:   # blue, green, cyan light
+            h, s = self.hue(soft(neon))
+            self.assertTrue(160 <= h <= 210, h)                   # -> teal
+            self.assertLess(s, 0.5)                               # -> soft
+            self.assertLess(s, self.hue(hard(neon))[1])
+        for hd in range(230, 345, 5):                             # still nothing purple
+            for s in (0.2, 0.5, 1.0):
+                h, ll, ss = colorsys.rgb_to_hls(*soft(colorsys.hls_to_rgb(hd / 360, 0.5, s)))
+                self.assertFalse(250 <= h * 360 <= 330 and ss > 0.15, (hd, s, h * 360, ss))
+
 
 class TestStylesAndNotes(unittest.TestCase):
     def test_builtin_styles_resolve(self):

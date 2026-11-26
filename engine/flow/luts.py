@@ -181,7 +181,7 @@ def _hue_dist(a: float, b: float) -> float:
 
 
 def nightlife_transform(keep_green: bool = False, warm: float = 0.0, skin_boost: float = 1.3,
-                        skin_hue: float = 24.0) -> Callable[[RGB], RGB]:
+                        skin_hue: float = 24.0, soft: float = 0.0) -> Callable[[RGB], RGB]:
     """Nightlife look, tuned per clip.
 
     Skin is detected on the incoming pixel and handled separately: it is not hue-remapped,
@@ -192,8 +192,14 @@ def nightlife_transform(keep_green: bool = False, warm: float = 0.0, skin_boost:
     warm        0..1 warm-light correction: cools the cast, tames neon red/orange light,
                 deepens teal shadows (skin is rebuilt warm afterwards)
     skin_boost  saturation lift for skin
+    soft        0..1 "soft teal / soft orange": paler teal, gentler orange skin, neon green/blue/
+                purple light pulled down harder, a little less contrast
     """
     warm = clamp(warm)
+    soft = clamp(soft)
+    skin_boost = skin_boost - 0.18 * soft
+    skin_max = 0.58 - 0.12 * soft
+    cool_sat = 1.0 - 0.3 * soft          # extra saturation cut for everything on the teal side
 
     def tf(c: RGB) -> RGB:
         r, g, b = clamp(c[0]), clamp(c[1]), clamp(c[2])
@@ -221,7 +227,15 @@ def nightlife_transform(keep_green: bool = False, warm: float = 0.0, skin_boost:
             green_kept = smoothstep(55.0, 70.0, deg) * (1.0 - smoothstep(180.0, 195.0, deg))
             w *= 1.0 - green_kept
         nd = deg + (night_hue(deg) - deg) * w
+        if soft > 0:  # soft: green light lands on teal, not on teal-green
+            nd += 8.0 * soft * smoothstep(85.0, 110.0, deg) * (1.0 - smoothstep(165.0, 190.0, deg)) * w
         ns = s * (1.0 + (_interp(NIGHT_SAT, deg) - 1.0) * w_sat)
+        if soft > 0 and 60.0 <= deg < 290.0:  # green, cyan, blue, violet light -> soft teal
+            band = smoothstep(60.0, 80.0, deg) * (1.0 - smoothstep(270.0, 290.0, deg))
+            ns *= 1.0 + (cool_sat - 1.0) * band * w_sat * (1.0 - 0.5 * green_kept)
+            # lime / yellow-green light: the remap would throw it to green, so it is mostly removed
+            lime = smoothstep(52.0, 66.0, deg) * (1.0 - smoothstep(98.0, 112.0, deg))
+            ns *= 1.0 - 0.6 * soft * lime * (1.0 - green_kept)
         nd %= 360.0
         # skin that only shows up after the remap (violet/pink-lit faces now on the warm side)
         d1 = _hue_dist(nd, 22.0)
@@ -234,10 +248,10 @@ def nightlife_transform(keep_green: bool = False, warm: float = 0.0, skin_boost:
             pale_green = (smoothstep(60.0, 75.0, deg) * (1.0 - smoothstep(195.0, 210.0, deg))
                           * (1.0 - smoothstep(0.12, 0.28, s)) * smoothstep(0.25, 0.4, l) * (1.0 - sk))
             ns *= 1.0 - 0.75 * pale_green
-        knee = 0.62 - 0.12 * warm  # tame neon light (warm clips harder)
-        knee = knee + (1.0 - knee) * green_kept
+        knee = 0.62 - 0.12 * warm - 0.12 * soft  # tame neon light (warm clips harder)
+        knee = knee + (1.0 - knee) * green_kept * (1.0 - 0.6 * soft)
         if ns > knee:
-            ns = knee + (ns - knee) * 0.35
+            ns = knee + (ns - knee) * (0.35 - 0.12 * soft)
         r2, g2, b2 = colorsys.hls_to_rgb(nd / 360.0, l, clamp(ns))
         y1 = luma(r2, g2, b2)  # keep brightness: a blue wash turned teal must not get brighter
         if y1 > 1e-4:
@@ -248,7 +262,7 @@ def nightlife_transform(keep_green: bool = False, warm: float = 0.0, skin_boost:
                 yy = luma(r2, g2, b2)
                 t = (mx - 1.0) / max(1e-4, mx - yy)
                 r2, g2, b2 = (r2 + (yy - r2) * t, g2 + (yy - g2) * t, b2 + (yy - b2) * t)
-        c2 = per_channel((r2, g2, b2), lambda x: s_curve(x, 0.14, 0.42))
+        c2 = per_channel((r2, g2, b2), lambda x: s_curve(x, 0.14 - 0.04 * soft, 0.42))
         tint = (1.0 + 1.5 * warm) * (1.0 - sk)
         c2 = split_tone(c2, shadow=(-0.02 * tint, 0.012 * tint, 0.016 * tint),
                         highlight=(0.03, 0.012, -0.022))
@@ -257,7 +271,7 @@ def nightlife_transform(keep_green: bool = False, warm: float = 0.0, skin_boost:
             hs, ls, ss = colorsys.rgb_to_hls(clamp(c2[0]), clamp(c2[1]), clamp(c2[2]))
             hd = hs * 360.0
             hd = (hd + _hue_dist(skin_hue, hd) * 0.8 * sk) % 360.0
-            ss = ss + (min(max(ss, 0.26) * skin_boost, 0.58) - ss) * sk
+            ss = ss + (min(max(ss, 0.26 - 0.04 * soft) * skin_boost, skin_max) - ss) * sk
             c2 = colorsys.hls_to_rgb(hd / 360.0, ls, clamp(ss))
         # purple guard: whatever happened above, nothing leaves this look violet/purple
         hg, lg, sg = colorsys.rgb_to_hls(clamp(c2[0]), clamp(c2[1]), clamp(c2[2]))

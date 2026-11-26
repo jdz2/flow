@@ -23,6 +23,8 @@ clip on V1) and note ids (`N4`) come from `finish_review.txt`. All times are **t
                                                       // own look strength / warm-light fix; node tree with the clip's
                                                       // own conversion LUT kept on 01 Input and the per-clip look on
                                                       // 04 Look ("nodes": false = old single composed LUT)
+                                                      // "soft": 0–1 = soft teal / soft orange skin: paler teal, gentler
+                                                      // skin, lime/green/blue/purple light pulled down harder
   "stills": true,                                     // one reference still per graded clip into the Gallery album
                                                       // "Flow · <timeline>" (jpgs in stills/ next to the plan)
   "titles": [
@@ -55,6 +57,15 @@ clip on V1) and note ids (`N4`) come from `finish_review.txt`. All times are **t
     {"id": "N6", "status": "needs_user", "reason": "asks for a drone shot; no drone footage in the media pool"}
   ]
 }
+```
+
+Grading with a reference image and masks (rule-based Sky / Subject / Vignette windows and Skin / Greens /
+Highlights qualifiers on a ten-node tree): see `masks.md`. Short form:
+
+```jsonc
+"grade_clips": {"reference": "/path/still.jpg", "masks": true, "subjects": {"V1#4": [0.6, 0.5]},
+                "vignette": 0.22, "replace_existing": true},
+"clips": [{"item": "V1#6", "stabilize": true}]       // Resolve's stabilizer on a shaky clip
 ```
 
 Rules:
