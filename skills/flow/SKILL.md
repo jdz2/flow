@@ -126,6 +126,11 @@ Pick the mode from their answer; if unclear, ask with AskUserQuestion:
    - **Rebuild** for structural changes ("keep the joke", "cut the second take", new style, re-time): edit
      the plan, compile and build again (a new version). Transcription is cached, so this is fast.
 
+10. **Deliver** when they're happy ("export it", "render", "I want to post it"): `~/.flow/flow render`
+    (background; H.264 MP4 at the timeline's size in `~/Movies/Flow`, `--codec h265|prores`, `--out <dir>`)
+    writes the file plus an `.srt` of the spoken captions. `~/.flow/flow srt` writes only the `.srt`.
+    `~/.flow/flow status` says at any point which step a job is on and what to run next.
+
 ### AI shots (generated or restyled footage)
 
 Needs a connected video-generation tool set in this Claude session (for example the Magnific tools

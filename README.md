@@ -19,7 +19,7 @@ timeline: titles, cinematic touches, slow-mo, looks and B-roll.
 - macOS (Apple Silicon recommended) and **DaVinci Resolve Studio** 21.1.2+, with Preferences → System →
   General → **External scripting using: Local**
 - Claude (desktop app or Claude Code)
-- Homebrew. The installer adds `ffmpeg` and `whisper-cpp` if they're missing.
+- Homebrew. The installer adds `ffmpeg`, `whisper-cpp` and `zstd` if they're missing.
 
 ## Install
 ```bash
@@ -30,11 +30,29 @@ The installer:
 - writes the Flow looks into Resolve's `LUT/Flow` folder
 - adds a **Workspace → Scripts → Flow Build** menu item in Resolve
 - links the skill to `~/.claude/skills/flow`, so `/flow` works in Claude
+- links the slash commands into `~/.claude/commands` as `/flow-reel`, `/flow-tweak`, `/flow-render`, …
 
 Check your setup any time with:
 ```bash
 ~/.flow/flow doctor
 ```
+
+## Slash commands
+`/flow` does everything, and asks. These jump straight to one job (installed as `/flow:<name>` with the
+plugin, or `/flow-<name>` by `install.sh`):
+
+| command | does |
+|---|---|
+| `/flow:reel [clip] [style]` | cut a clip into a reel, skipping the "what are we editing?" step |
+| `/flow:finish [notes file]` | finish the open timeline from its markers and placeholders |
+| `/flow:tweak <change>` | live edit the reel in place: "punch in here", "captions yellow", "warmer" |
+| `/flow:undo [n]` | undo the last live edit(s) |
+| `/flow:render [h264\|h265\|prores] [folder]` | render the reel (default H.264 MP4 in `~/Movies/Flow`) plus an `.srt` |
+| `/flow:status [all]` | where the edit stands and what's next |
+| `/flow:broll [folder\|bin]` | index and describe B-roll for the current job |
+| `/flow:styles [id]` | list styles, looks and fonts |
+| `/flow:teach <name>` | learn a style from a timeline you cut by hand |
+| `/flow:check` | check the setup and fix what's missing |
 
 ## What Flow does
 **Reel mode** (one clip → a vertical reel):
@@ -82,6 +100,9 @@ See `skills/flow/reference/notes.md` for how to leave notes.
 | `styles` · `style-save` · `learn-style` | styles |
 | `fonts` · `luts [--install]` | resources |
 | `frames` | exports check stills |
+| `status` · `jobs` | where a job stands and the next step; recent jobs (offline) |
+| `render [--codec h264\|h265\|prores] [--out dir]` | renders the job's timeline via the Deliver page, with an `.srt` |
+| `srt [--out file]` | writes the job's captions as SubRip (offline) |
 | `probe --switch` | tests the Resolve API in a "Flow Sandbox" project |
 
 Jobs live in `~/.flow/jobs/<clip>/`: `analysis.json`, `review.txt`, `edit_plan.json`, `build.json`,

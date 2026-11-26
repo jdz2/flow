@@ -34,7 +34,11 @@ def which(name: str) -> str | None:
 
 def read_json(path: Path) -> Any:
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        try:
+            return json.load(f)
+        except json.JSONDecodeError as exc:
+            raise FlowError(f"{path} is not valid JSON (line {exc.lineno}, column {exc.colno}: {exc.msg}). "
+                            "Fix it and run the command again.") from None
 
 
 def write_json(path: Path, data: Any) -> None:

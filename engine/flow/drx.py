@@ -152,25 +152,54 @@ def dump(buf: Union[bytes, Msg], depth: int = 0, max_depth: int = 8) -> str:
 _BODY = re.compile(r"(<pClipFullVer>.*?<Body>)([0-9a-fA-F]+)(</Body>)", re.S)
 
 
+def _zstd_exe() -> Optional[str]:
+    exe = shutil.which("zstd")
+    if exe:
+        return exe
+    for cand in ("/opt/homebrew/bin/zstd", "/usr/local/bin/zstd"):
+        if Path(cand).exists():
+            return cand
+    return None
+
+
+def _zstd_module():
+    try:
+        import zstandard  # type: ignore  # optional: pip install zstandard
+        return zstandard
+    except Exception:
+        return None
+
+
 def _zstd(data: bytes, decompress: bool) -> bytes:
     """Resolve only accepts single-segment frames that carry the content size and no checksum, so
-    compress from a file (stdin would leave the size out) with --no-check."""
+    compress from a file (stdin would leave the size out) with --no-check. Falls back to the
+    `zstandard` Python module when the zstd binary isn't installed."""
     import tempfile
-    exe = shutil.which("zstd") or "/opt/homebrew/bin/zstd"
-    with tempfile.TemporaryDirectory() as tmp:
-        src = Path(tmp) / "in"
-        src.write_bytes(data)
-        args = [exe, "-q", "-c"] + (["-d"] if decompress else ["-19", "--no-check"]) + [str(src)]
-        p = subprocess.run(args, capture_output=True)
-    if p.returncode != 0:
-        raise RuntimeError(f"zstd failed: {p.stderr.decode(errors='replace')[:200]}")
-    if not decompress and p.stdout[4:5] and not p.stdout[4] & 0x20:
+    exe = _zstd_exe()
+    if exe:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "in"
+            src.write_bytes(data)
+            args = [exe, "-q", "-c"] + (["-d"] if decompress else ["-19", "--no-check"]) + [str(src)]
+            p = subprocess.run(args, capture_output=True)
+        if p.returncode != 0:
+            raise RuntimeError(f"zstd failed: {p.stderr.decode(errors='replace')[:200]}")
+        out = p.stdout
+    else:
+        zs = _zstd_module()
+        if zs is None:
+            raise RuntimeError("zstd not found. Install it: brew install zstd")
+        if decompress:
+            out = zs.ZstdDecompressor().decompress(data)
+        else:
+            out = zs.ZstdCompressor(level=19, write_checksum=False, write_content_size=True).compress(data)
+    if not decompress and out[4:5] and not out[4] & 0x20:
         raise RuntimeError("zstd frame is not single-segment; Resolve would reject it")
-    return p.stdout
+    return out
 
 
 def zstd_available() -> bool:
-    return bool(shutil.which("zstd") or Path("/opt/homebrew/bin/zstd").exists())
+    return bool(_zstd_exe() or _zstd_module())
 
 
 def read_grade(path: Union[str, Path]) -> Tuple[str, bytes]:
