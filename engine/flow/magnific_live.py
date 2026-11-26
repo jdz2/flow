@@ -53,6 +53,28 @@ def _tone(freq: int, seconds: float) -> List[str]:
 
 PRORES = ["-c:v", "prores_ks", "-profile:v", "3", "-pix_fmt", "yuv422p10le"]
 
+WEBP_SAMPLE = (
+    "UklGRjIFAABXRUJQVlA4ICYFAACQIgCdASpsAMAAPxFwtFUsJT+jJpD+6/AiCWxu9sE15JlKrr6b2U3Aer/lL+YHze2t+wfh"
+    "roijJeq30F/C+6T2bvcZ/oP6r64HQM/jPoL/Un9kvdA/zP+9/vHuf/y/pAfzP0u/Zs/nXqP/wn/N9bj+5Ho86rZ5VPjjHAsy"
+    "X9VUIAGATzrEbSLLsvIutoq96IKyDPp26cg3zsWVzOPYleIk3Omh7pbiTHfCsblk0Tj1RAaZtGIxTtnX0Z+Bbq+MHt4aZi8X"
+    "ELh5lp0TPORdUZDRkjF+bdtUUu2lM2dICUoombCYwuIsa4PPDTA02Po76Xjt/Qa2l9Iezs5T3+BG+6kJy4sXfPFgpTXcudnS"
+    "Pya2+DtgIbELjlpQoHfPOTwA/vGNYNNCQmnjt6qXtgiqPel0YW+blu+K66YgSt7qYQEBdomI6qADFT5doa7YfzlEqk8Fdzrc"
+    "9Ci/xYbp/xP1J6birK50aPG7VR5HB4eSQzaPEvYS7uBNVpvKVGsPVmbHGO7iNzzV/g5MqhFnvjidcRL+5hCr6prZYHK8ZwAZ"
+    "ZkLe0M8PelfEhVqbij236FUVPCjHSjvBkL+TB/yeQ3rz/mo772mRSfIc/xEMOMONTaVT2DxXNqZn3SINvPgPmEsLzS93lGec"
+    "XxzZQ37kFGWZQhTAAL//tNIcydhUTRz4w+dxXNP3EBXrLpym/Qwnp5KGXyHdcxOf3omgXn52I5RLxiZdABHf5nm/896XsRbw"
+    "L23AsOqoIlMx/Yzx8tsVHiC30VZNDFFlQ5P8GMrEpX+nAS55xBdE3NOpxdSA3ACz3YOY+R/Z/+OnLEgV3pGx+jv+AfYuF87k"
+    "xoqhdIyg7y/ek7QXIrIdkPn4g23tvkvhTmEC6xMJ5okn8ndiRYfOLIMLcDb50DzTuQJX0E+swRPSYvNAQyKPYNzp+23H7cEC"
+    "lasAfqpLdFkaNceqwUuBg0hsZPufnLI3E9Z+A9zhxRzhBn5/DygfqrMP536EaormQhDGChOfmmi04CJIZ6biGorJT/ULD9hm"
+    "b8O3eLMi+UXAAk/1EyQj7PsqgDW2p4PJNyCz12v9LX4dK2lWMWyj8xE4Mf3zik4wkgIkssWXkLVbBVITpm8AlBwC29XQC0Xh"
+    "fMyYB1n1DGDkPpmhXrLyO01y/dO6F+b//QM0Pr3c5YjDb3C4zbQdbbCQ4zhsCWCa42P3yXolMFI3ocUAezza9QKIPC7lDivW"
+    "2O6phJfuClpwIlhcKUPE5/K7X81v/3jyOm/0xZAYpZU2vTsFTbc/mVI94G5khPEsWCZ7q4qBe569fnvofCggpd75/2LgLi6g"
+    "sNv/ZT9HTtudvdJp/Et9Vn73lOeWjxj7nfqmQU9cG+s0U27aaCo2kkkhT3HTUe2nxL8NqYZPrT+oqKXDfXp9j1STHQMvkI16"
+    "gNNmtfHxvgiPqPcQnt71INf/oWL2JXVNgZYSPfZMaScqeYjypk4f746eKTPf4R2TJ4uVkfnSQavfDZB7ePrPMEm0kzAvgK+q"
+    "Zmt1gyZqitu/rLfQwKLS/1Q10vis5HPcti9mR/kUxq/QH4GnDwvXYThwFTcmXxmd1TmjHlXhTTJb704f4B9mOz1qq43WY3zS"
+    "XxouXjtF6tNX06gT90HsQ803L2TC++1lGBpW30B90/vggPo2uMbFaqsbh7jwqGichuTmcA4RMFJgQdcHBi5qv6qR2dg5g9tJ"
+    "A+K3DdA14xDkEwAA8nUXhN1v8nQKuIHnEawIByzmAUsqwwEBkQm2oAAA"
+)  # 108x192, made with ffmpeg testsrc + libwebp
+
 
 def _h264(inputs: List[str], out: Path) -> None:
     last = None
@@ -66,6 +88,14 @@ def _h264(inputs: List[str], out: Path) -> None:
     raise last  # type: ignore[misc]
 
 
+def _webp(p: Path) -> None:
+    try:
+        _ff(_pic("testsrc", 1, "540x960") + ["-frames:v", "1", "-c:v", "libwebp", str(p)])
+    except FlowError:  # no WebP encoder in this ffmpeg: use the sample (decoding is what Flow needs)
+        import base64
+        p.write_bytes(base64.b64decode("".join(WEBP_SAMPLE)))
+
+
 def make_media(d: Path) -> dict:
     """The clips the test drops into its folder. Kept between runs (made once)."""
     d.mkdir(parents=True, exist_ok=True)
@@ -74,7 +104,7 @@ def make_media(d: Path) -> dict:
         "drone_v1.mov": lambda p: _ff(_pic("smptehdbars", 3) + PRORES + [str(p)]),
         "still16.png": lambda p: _ff(_pic("testsrc2", 1) + ["-frames:v", "1", "-pix_fmt", "rgb48be", str(p)]),
         "tone.wav": lambda p: _ff(_tone(440, 2) + ["-c:a", "pcm_s24le", str(p)]),
-        "web.webp": lambda p: _ff(_pic("testsrc", 1, "540x960") + ["-frames:v", "1", "-c:v", "libwebp", str(p)]),
+        "web.webp": _webp,
         "ph_video.mov": lambda p: _ff(_pic("rgbtestsrc", 3) + PRORES + [str(p)]),
         "ph_still.png": lambda p: _ff(_pic("smptehdbars", 1) + ["-frames:v", "1", "-pix_fmt", "rgb48be", str(p)]),
         "ph_tone.wav": lambda p: _ff(_tone(660, 2) + ["-c:a", "pcm_s24le", str(p)]),
@@ -95,12 +125,13 @@ def make_media(d: Path) -> dict:
             files[name] = str(p)
         except FlowError as exc:
             skipped[name] = str(exc).splitlines()[0]
-    need = set(jobs) - {"web.webp"}
-    return {"ok": need <= set(files), "files": files, "skipped": skipped}
+    return {"ok": set(jobs) <= set(files), "files": files, "skipped": skipped}
 
 
 # ---------------------------------------------------------------- Resolve helpers
-def _bin(mp: Any, names=("Flow", "Magnific")) -> Any:
+def _bin(mp: Any, names=None) -> Any:
+    from flow import magnific as mg
+    names = names or ("Flow", mg.BIN)
     f = mp.GetRootFolder()
     for n in names:
         f = next((s for s in (f.GetSubFolderList() or []) if s.GetName() == n), None)
@@ -226,6 +257,8 @@ def run_live(switch: bool = False, url: Optional[str] = None, creation: Optional
             val = fn()
             ok = bool(val.get("ok", True)) if isinstance(val, dict) else bool(val)
             T[label] = {"ok": ok, "detail": val}
+            if isinstance(val, dict) and val.get("skipped"):
+                T[label]["skipped"] = val["skipped"]
         except Exception as exc:
             T[label] = {"ok": False, "error": f"{type(exc).__name__}: {exc}",
                         "trace": traceback.format_exc().splitlines()[-4:]}
@@ -239,7 +272,8 @@ def run_live(switch: bool = False, url: Optional[str] = None, creation: Optional
         return res
     m = made["files"]
 
-    old_env = os.environ.get("FLOW_HOME")
+    old_env, old_bin = os.environ.get("FLOW_HOME"), mg.BIN
+    mg.BIN = f"Magnific {stamp[-6:]}"          # a new bin each run, so making the bin is tested every time
     os.environ["FLOW_HOME"] = str(home)       # the background watcher this test starts uses it too
     paths.FLOW_HOME = home
     home.mkdir(parents=True, exist_ok=True)
@@ -291,6 +325,8 @@ def run_live(switch: bool = False, url: Optional[str] = None, creation: Optional
             keep["drone"] = pulled["file"]
             shutil.copy2(m["still16.png"], root / "still16.png")
             shutil.copy2(m["tone.wav"], root / "tone.wav")
+            mp.SetCurrentFolder(mp.GetRootFolder())   # "the bin the user has open"
+            time.sleep(1.0)
             prev = mp.GetCurrentFolder()
             prev_id = prev.GetUniqueId() if prev else None
             before, counts = _snap(tl), (tl.GetTrackCount("video"), tl.GetTrackCount("audio"))
@@ -312,7 +348,7 @@ def run_live(switch: bool = False, url: Optional[str] = None, creation: Optional
             ok = (len(r["imported"]) == 3 and all(v and v["in_bin"] and v["color"] == "Purple" for v in got.values())
                   and F["metadata_comments"] and F["metadata_description"] and F["metadata_keywords"]
                   and F["third_party_creation"] and F["bin_view_restored"] and same)
-            return {"ok": ok, "sync": _brief(r), "clips": got, "bin_before": prev.GetName() if prev else None,
+            return {"ok": ok, "sync": _brief(r), "clips": got, "bin": mg.BIN, "bin_before": prev.GetName() if prev else None,
                     "bin_after": cur.GetName() if cur else None, "timeline_untouched": same}
         test("bin_import", bin_import, need=["tl"])
 
@@ -349,9 +385,10 @@ def run_live(switch: bool = False, url: Optional[str] = None, creation: Optional
             F.setdefault("playhead_after_place", []).append([tc0, tl.GetCurrentTimecode()])
             cur = project.GetCurrentTimeline()
             same = _snap(tl, skip) == before
-            ok = (it is not None and got["start"] == want and got["length"] == expect_len and same
+            kept = tl.GetCurrentTimecode() == tc0
+            ok = (it is not None and got["start"] == want and got["length"] == expect_len and same and kept
                   and cur is not None and cur.GetName() == tl.GetName())
-            return {"ok": ok, "expected": {"start": want, "length": expect_len}, "got": got,
+            return {"ok": ok, "expected": {"start": want, "length": expect_len}, "got": got, "playhead_kept": kept,
                     "rest_of_timeline_untouched": same, "sync": _brief(r), "uid": got and got["uid"]}
 
         def ph_video():
@@ -467,14 +504,16 @@ def run_live(switch: bool = False, url: Optional[str] = None, creation: Optional
             r1 = mp.AppendToTimeline([{"mediaPoolItem": fill, "startFrame": 0, "endFrame": e(60), "trackIndex": k,
                                        "recordFrame": start + 30, "mediaType": 1}]) or []
             s1 = spans()
-            if r1:
-                tl.DeleteClips([x for x in r1 if x], False)
+            deleted = bool(r1) and bool(tl.DeleteClips([x for x in r1 if x], False))
+            s1d = spans()
             r2 = mp.AppendToTimeline([{"mediaPoolItem": fill, "startFrame": 0, "endFrame": e(90), "trackIndex": k,
                                        "recordFrame": start + 30, "mediaType": 1}]) or []
             s2 = spans()
             F["append_exact_gap"] = [x[:2] for x in s1] == [[0, 30], [30, 60], [90, 60]]
-            F["append_too_long"] = {"returned": len(r2), "track_after": [x[:2] for x in s2]}
-            return {"ok": bool(F["append_exact_gap"]), "before": s0, "exact": s1, "too_long": s2}
+            F["append_too_long"] = {"returned": len(r2), "deleted_first": deleted,
+                                    "after_delete": [x[:2] for x in s1d], "track_after": [x[:2] for x in s2],
+                                    "new_item": [r2[0].GetStart() - start, r2[0].GetDuration()] if r2 else None}
+            return {"ok": bool(F["append_exact_gap"]), "before": s0, "exact": s1, "after_delete": s1d, "too_long": s2}
         test("probe_fill_gap", gap, need=["tl", "aroll"])
 
         def replace():
@@ -536,6 +575,7 @@ def run_live(switch: bool = False, url: Optional[str] = None, creation: Optional
                 res["returned_to"] = None
                 res["return_error"] = f"{type(exc).__name__}: {exc}"
         paths.FLOW_HOME = real_home
+        mg.BIN = old_bin
         if old_env is None:
             os.environ.pop("FLOW_HOME", None)
         else:

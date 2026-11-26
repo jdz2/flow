@@ -135,6 +135,11 @@ class FakeTL:
     def GetCurrentTimecode(self):
         return frames_to_tc(self.start + self.playhead, self.fps)
 
+    def SetCurrentTimecode(self, tc):
+        from flow.util import tc_to_frames
+        self.playhead = tc_to_frames(tc, self.fps) - self.start
+        return True
+
     def GetTrackCount(self, kind):
         return len(self.tracks[kind])
 
@@ -170,6 +175,7 @@ class FakeMP:
     def AddSubFolder(self, parent, name):
         f = FakeFolder(name)
         parent.subs.append(f)
+        self.cur = f  # like Resolve 21.2 (live test): a bin a script makes is opened in the media pool
         return f
 
     def GetCurrentFolder(self):
@@ -196,6 +202,7 @@ class FakeMP:
             kind = "audio" if info.get("mediaType") == 2 else "video"
             it = FakeItem(info["mediaPoolItem"], info["recordFrame"], info["endFrame"] - info["startFrame"])
             self.tl.tracks[kind][info["trackIndex"] - 1]["items"].append(it)
+            self.tl.playhead = it.GetEnd() - self.tl.start  # like Resolve: the playhead jumps to the new clip's end
             out.append(it)
         return out
 
@@ -424,6 +431,7 @@ class SyncToResolve(Base):
         c = mg.pull(file=str(media(self.td / "c.wav", "audio")), name="C")
         res = mg.sync(connect=self.connect)
         self.assertEqual(len(res["placed"]), 3)
+        self.assertEqual(tl.playhead, 48)                                     # the user's playhead stays put
         v = tl.tracks["video"]
         self.assertEqual([t["name"] for t in v], ["Video 1", "Flow Magnific"])
         self.assertEqual(v[0]["items"], [])                                   # the user's track: untouched

@@ -431,6 +431,41 @@ def _sub_bin(mp: Any, parent: Any, name: str) -> Any:
     return sub or parent
 
 
+def restore_view(mp: Any, prev: Any, res: Optional[dict] = None) -> bool:
+    """Put the media pool back on the bin the user had open. Resolve opens a bin when a script makes it or
+    imports into it, and its media pool can lag, so check, and try again after a moment."""
+    if prev is None:
+        return True
+    try:
+        want = prev.GetUniqueId()
+    except Exception:
+        return False
+
+    def back() -> bool:
+        try:
+            cur = mp.GetCurrentFolder()
+            return cur is not None and cur.GetUniqueId() == want
+        except Exception:
+            return False
+    for _ in range(3):
+        if back():
+            return True
+        try:
+            mp.SetCurrentFolder(prev)
+        except Exception:
+            pass
+        time.sleep(0.5)
+    if back():
+        return True
+    if res is not None:
+        try:
+            name = prev.GetName()
+        except Exception:
+            name = "you had open"
+        res["notes"].append(f"the media pool stayed on Flow › {BIN} (Resolve didn't go back to the bin {name})")
+    return False
+
+
 def _tag(mpi: Any, meta: dict) -> None:
     """Purple like AI shots, and what made it in the metadata: searchable in Resolve, and keywords for
     Flow's B-roll matching."""
@@ -480,7 +515,8 @@ def place(mp: Any, tl: Any, mpi: Any, path: Path, kind: str, still_seconds: floa
     from flow.build import _caps
     fps = _num(tl.GetSetting("timelineFrameRate")) or 24.0
     start = int(tl.GetStartFrame() or 0)
-    ph = max(0, tc_to_frames(tl.GetCurrentTimecode(), fps) - start)
+    tc0 = tl.GetCurrentTimecode()
+    ph = max(0, tc_to_frames(tc0, fps) - start)
     lane = "audio" if kind == "audio" else "video"
     if kind == "image":
         src_frames = max(1, int(round(float(still_seconds or DEFAULTS["still_seconds"]) * fps)))
@@ -507,6 +543,11 @@ def place(mp: Any, tl: Any, mpi: Any, path: Path, kind: str, still_seconds: floa
         it.SetRightOffset((it.GetRightOffset() or 0) + (d - rec_len))
     try:
         it.SetClipColor("Purple")
+    except Exception:
+        pass
+    try:  # Resolve moves the playhead to the end of a clip it adds; put the user's back
+        if tc0 and tl.GetCurrentTimecode() != tc0:
+            tl.SetCurrentTimecode(tc0)
     except Exception:
         pass
     return {"timeline": tl.GetName(), "item": it.GetUniqueId(), "lane": lane, "track": k,
@@ -551,8 +592,8 @@ def _import(ready: List[Path], root: Path, st: dict, pulled: dict, where: str, c
             batch.append((rel, p, k, meta))
     if not batch:
         return
+    prev = mp.GetCurrentFolder()  # first: Resolve opens a bin it just made (and the bin it imports into)
     target = _sub_bin(mp, _flow_bin(mp), BIN)
-    prev = mp.GetCurrentFolder()
     items: Dict[str, Tuple[Any, bool]] = {}
     todo = []
     for rel, p, k, meta in batch:
@@ -572,11 +613,7 @@ def _import(ready: List[Path], root: Path, st: dict, pulled: dict, where: str, c
             it = by_path.get(_key(p))
             if it is not None:
                 items[rel] = (it, False)
-        try:  # put the user's media pool view back where it was
-            if prev is not None and prev.GetUniqueId() != target.GetUniqueId():
-                mp.SetCurrentFolder(prev)
-        except Exception:
-            pass
+    restore_view(mp, prev, res)
     pname = project.GetName()
     for rel, p, k, meta in batch:
         if rel not in items:
