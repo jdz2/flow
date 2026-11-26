@@ -39,7 +39,8 @@ def _text_props(item: Any) -> Optional[dict]:
         return {
             "text": txt, "font": tool.GetInput("Font"), "font_style": tool.GetInput("Style"),
             "size": float(tool.GetInput("Size", end) or 0.07),
-            "color": _rgb_hex(tool.GetInput("Red1") or 1, tool.GetInput("Green1") or 1, tool.GetInput("Blue1") or 1),
+            "color": _rgb_hex(*(1.0 if v is None else v for v in
+                                (tool.GetInput("Red1"), tool.GetInput("Green1"), tool.GetInput("Blue1")))),
             "outline": bool(tool.GetInput("Enabled2")), "box": bool(tool.GetInput("Enabled4")),
             "position": [float(center.get(1, 0.5)), float(center.get(2, 0.3))] if isinstance(center, dict) else None,
         }

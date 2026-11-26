@@ -145,7 +145,10 @@ class Session:
 
     def items(self, key: str) -> List[Any]:
         k = self.track(key)
-        return list(self.tl.GetItemListInTrack("video", k) or []) if k else []
+        if not k:
+            return []
+        from flow.finish import clips_on_track  # transitions are listed as items too; skip them
+        return clips_on_track(self.tl, k)
 
     def playhead(self) -> int:
         return tc_to_frames(self.tl.GetCurrentTimecode(), self.fps) - self.start
@@ -249,7 +252,8 @@ class Session:
     def _caption_cfg(self) -> dict:
         cfg = copy.deepcopy((self.b.get("style") or {}).get("captions") or {})
         for e in self.entries:
-            if e["op"] == "captions" and not e.get("undone"):
+            # only whole-timeline restyles define the base style; ranged ones stay in their range
+            if e["op"] == "captions" and not e.get("undone") and not any(x is not None for x in e.get("range") or []):
                 cfg.update(e["after"])
         return cfg
 
@@ -285,6 +289,11 @@ class Session:
             if tool is None:
                 continue
             text = tool.GetInput("StyledText") or caps.get(f0, {}).get("text", "")
+            case = cfg.get("case")  # live --case: upper/lower apply now ("none" can't recover the original)
+            if case == "upper":
+                text = text.upper()
+            elif case == "lower":
+                text = text.lower()
             accent = bool(caps.get(f0, {}).get("accent"))
             if style_caption(it, text, cfg, accent, it.GetDuration()):
                 n += 1
@@ -449,8 +458,9 @@ class Session:
         elif op == "caption_text":
             from flow.captions import text_tool
             it = self.item_at("captions", e["frame"])
-            if it is not None:
-                text_tool(it)[1].SetInput("StyledText", e["before"])
+            tool = text_tool(it)[1] if it is not None else None
+            if tool is not None and e.get("before") is not None:
+                tool.SetInput("StyledText", e["before"])
                 self.show(e["frame"] + 2)
         elif op == "grade":
             base_cdl = (self.b.get("grade") or {}).get("cdl")

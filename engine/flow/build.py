@@ -73,7 +73,11 @@ class Inserter:
         if v1:  # Finish mode: park V1's clips on a temporary track
             tl.AddTrack("video")
             self.vacated = tl.GetTrackCount("video")
-            if not tl.MoveItems(v1, {"trackIndex": self.vacated}, False):
+            try:
+                moved = tl.MoveItems(v1, {"trackIndex": self.vacated}, False)
+            except (AttributeError, TypeError):
+                moved = False
+            if not moved:
                 raise FlowError("Couldn't make room on V1 to place text and overlays.")
         for kind in ("video", "audio"):
             for k in range(1, (tl.GetTrackCount(kind) or 0) + 1):
@@ -91,7 +95,10 @@ class Inserter:
         if self.vacated:
             parked = tl.GetItemListInTrack("video", self.vacated) or []
             if parked:
-                tl.MoveItems(parked, {"trackIndex": 1}, False)
+                try:
+                    tl.MoveItems(parked, {"trackIndex": 1}, False)
+                except (AttributeError, TypeError):
+                    pass
             try:
                 tl.DeleteTrack("video", self.vacated)
             except Exception:
