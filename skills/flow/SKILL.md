@@ -20,6 +20,8 @@ Reference files in this skill folder; read the one you need before writing a pla
 - `reference/effects.md`: effects, masks, titles, looks and their parameters
 - `reference/notes.md`: how users leave production notes (markers, placeholders, notes files)
 - `reference/styles.md`: style JSON, for custom styles
+- `reference/masks.md`: the grading ruleset: reference-image match, sky / subject / vignette windows and
+  skin / greens / highlights qualifiers (Finish mode `grade_clips.masks` / `.reference`)
 
 ## 0. Preflight (every time)
 
@@ -156,6 +158,10 @@ Needs a connected video-generation tool set in this Claude session (for example 
 1. The user opens the timeline in Resolve. Run `~/.flow/flow finish-scan` (add `--file <notes.md>` if
    they mention a notes doc). Read `~/.flow/finish/<timeline>/finish_review.txt`.
 2. Look at the material with `~/.flow/flow frames --count 6` and Read the stills it saves.
+   If the user shows a reference image for the grade, or wants the grade to "come together", use
+   `grade_clips.reference` + `grade_clips.masks` (see `reference/masks.md`); afterwards Read a few
+   `grade/masks/*_windows.jpg` and the gallery stills, and tune the rules if a window is off.
+   Shaky handheld / car shots: `{"item": "V1#n", "stabilize": true}`.
 3. Ask only what the notes and the footage don't answer, in one AskUserQuestion call: for example the
    look, the title font, and whether to auto-add cinematic touches beyond the notes.
 4. Write `finish_plan.json` next to the scan, following `reference/finish_plan.md`. Cover **every** note.
